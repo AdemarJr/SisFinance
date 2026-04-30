@@ -35,6 +35,7 @@ export function Lancamentos() {
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroStatus, setFiltroStatus] = useState<string>('todos');
   const [empresas, setEmpresas] = useState<any[]>([]);
+  const NONE_SELECT_VALUE = '__none__';
   
   const [formData, setFormData] = useState({
     empresa_id: '',
@@ -475,14 +476,19 @@ export function Lancamentos() {
             <div className="space-y-2">
               <Label htmlFor="conta">Conta</Label>
               <Select 
-                value={formData.conta_origem_id} 
-                onValueChange={(value) => setFormData({ ...formData, conta_origem_id: value })}
+                value={formData.conta_origem_id || NONE_SELECT_VALUE} 
+                onValueChange={(value) =>
+                  setFormData({
+                    ...formData,
+                    conta_origem_id: value === NONE_SELECT_VALUE ? '' : value,
+                  })
+                }
               >
                 <SelectTrigger id="conta">
                   <SelectValue placeholder="Selecione uma conta" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Nenhuma</SelectItem>
+                  <SelectItem value={NONE_SELECT_VALUE}>Nenhuma</SelectItem>
                   {contas.map((conta) => (
                     <SelectItem key={conta.id} value={conta.id}>
                       {conta.nome}
@@ -495,14 +501,19 @@ export function Lancamentos() {
             <div className="space-y-2">
               <Label htmlFor="fornecedor">Fornecedor</Label>
               <Select 
-                value={formData.fornecedor_id} 
-                onValueChange={(value) => setFormData({ ...formData, fornecedor_id: value })}
+                value={formData.fornecedor_id || NONE_SELECT_VALUE} 
+                onValueChange={(value) =>
+                  setFormData({
+                    ...formData,
+                    fornecedor_id: value === NONE_SELECT_VALUE ? '' : value,
+                  })
+                }
               >
                 <SelectTrigger id="fornecedor">
                   <SelectValue placeholder="Selecione um fornecedor" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Nenhum</SelectItem>
+                  <SelectItem value={NONE_SELECT_VALUE}>Nenhum</SelectItem>
                   {fornecedores.map((fornecedor) => (
                     <SelectItem key={fornecedor.id} value={fornecedor.id}>
                       {fornecedor.nome}

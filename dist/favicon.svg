@@ -1,0 +1,52 @@
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+    <linearGradient id="accentGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Círculo de fundo -->
+  <circle cx="50" cy="50" r="48" fill="url(#logoGradient)" />
+  
+  <!-- Símbolo $ estilizado -->
+  <path
+    d="M50 20 L50 25 M50 75 L50 80"
+    stroke="white"
+    stroke-width="6"
+    stroke-linecap="round"
+  />
+  
+  <!-- S superior -->
+  <path
+    d="M 38 35 Q 38 28 45 28 L 55 28 Q 62 28 62 35 Q 62 42 55 42 L 45 42"
+    stroke="white"
+    stroke-width="6"
+    stroke-linecap="round"
+    fill="none"
+  />
+  
+  <!-- S inferior -->
+  <path
+    d="M 62 65 Q 62 72 55 72 L 45 72 Q 38 72 38 65 Q 38 58 45 58 L 55 58"
+    stroke="white"
+    stroke-width="6"
+    stroke-linecap="round"
+    fill="none"
+  />
+  
+  <!-- Gráfico de crescimento -->
+  <path
+    d="M 72 82 L 78 75 L 84 78 L 90 68"
+    stroke="url(#accentGradient)"
+    stroke-width="3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+  <circle cx="90" cy="68" r="2" fill="#10b981" />
+</svg>
