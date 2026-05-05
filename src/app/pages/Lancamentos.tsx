@@ -141,15 +141,15 @@ export function Lancamentos() {
   const handleEdit = (lancamento: any) => {
     setEditingId(lancamento.id);
     setFormData({
-      empresa_id: lancamento.empresa_id,
+      empresa_id: lancamento.empresa_id ? String(lancamento.empresa_id) : '',
       data: lancamento.data,
       tipo: lancamento.tipo,
       valor: lancamento.valor.toString(),
       descricao: lancamento.descricao || '',
       status: lancamento.status,
       forma_pagamento: lancamento.forma_pagamento || '',
-      conta_origem_id: lancamento.conta_origem_id || '',
-      fornecedor_id: lancamento.fornecedor_id || '',
+      conta_origem_id: lancamento.conta_origem_id ? String(lancamento.conta_origem_id) : '',
+      fornecedor_id: lancamento.fornecedor_id ? String(lancamento.fornecedor_id) : '',
     });
     setDialogOpen(true);
   };
@@ -224,14 +224,14 @@ export function Lancamentos() {
 
       {/* Filtros */}
       <div className="bg-card rounded-lg shadow-card p-4 mb-6 border border-border">
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4 overflow-x-auto">
+          <div className="flex items-center gap-2 shrink-0">
             <Filter className="size-4 text-muted-foreground" />
             <span className="text-sm font-medium text-foreground">Filtros:</span>
           </div>
           
           <Select value={filtroTipo} onValueChange={setFiltroTipo}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="w-[200px] shrink-0">
               <SelectValue placeholder="Tipo" />
             </SelectTrigger>
             <SelectContent>
@@ -243,7 +243,7 @@ export function Lancamentos() {
           </Select>
 
           <Select value={filtroStatus} onValueChange={setFiltroStatus}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="w-[200px] shrink-0">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -394,7 +394,7 @@ export function Lancamentos() {
                   </SelectTrigger>
                   <SelectContent>
                     {empresas.map((emp) => (
-                      <SelectItem key={emp.id} value={emp.id}>
+                      <SelectItem key={emp.id} value={String(emp.id)}>
                         {emp.nome}
                       </SelectItem>
                     ))}
@@ -490,7 +490,7 @@ export function Lancamentos() {
                 <SelectContent>
                   <SelectItem value={NONE_SELECT_VALUE}>Nenhuma</SelectItem>
                   {contas.map((conta) => (
-                    <SelectItem key={conta.id} value={conta.id}>
+                    <SelectItem key={conta.id} value={String(conta.id)}>
                       {conta.nome}
                     </SelectItem>
                   ))}
@@ -515,7 +515,7 @@ export function Lancamentos() {
                 <SelectContent>
                   <SelectItem value={NONE_SELECT_VALUE}>Nenhum</SelectItem>
                   {fornecedores.map((fornecedor) => (
-                    <SelectItem key={fornecedor.id} value={fornecedor.id}>
+                    <SelectItem key={fornecedor.id} value={String(fornecedor.id)}>
                       {fornecedor.nome}
                     </SelectItem>
                   ))}
