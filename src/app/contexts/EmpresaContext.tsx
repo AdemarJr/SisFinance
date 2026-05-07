@@ -29,10 +29,22 @@ export function EmpresaProvider({ children }: { children: ReactNode }) {
 
   // Carrega empresa selecionada do localStorage
   useEffect(() => {
-    const saved = localStorage.getItem('empresaSelecionada');
-    if (saved) {
-      setEmpresaSelecionadaState(saved);
+    try {
+      const saved = window.localStorage.getItem('empresaSelecionada');
+      if (saved) setEmpresaSelecionadaState(saved);
+    } catch {
+      // Alguns navegadores/modos (ex: Safari privado) podem bloquear localStorage
     }
+  }, []);
+
+  // Sincroniza seleção entre abas/janelas
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== 'empresaSelecionada') return;
+      setEmpresaSelecionadaState(e.newValue ?? '');
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   const loadEmpresas = async () => {
@@ -54,7 +66,11 @@ export function EmpresaProvider({ children }: { children: ReactNode }) {
 
   const setEmpresaSelecionada = (id: string) => {
     setEmpresaSelecionadaState(id);
-    localStorage.setItem('empresaSelecionada', id);
+    try {
+      window.localStorage.setItem('empresaSelecionada', id);
+    } catch {
+      // Se o storage não estiver disponível, apenas mantém em memória
+    }
   };
 
   const empresaAtual = empresaSelecionada

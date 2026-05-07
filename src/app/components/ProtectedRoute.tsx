@@ -1,5 +1,5 @@
-import { ReactNode, useEffect } from 'react';
-import { useNavigate } from 'react-router';
+import { ReactNode, useMemo } from 'react';
+import { Navigate, useLocation } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 
@@ -10,17 +10,13 @@ interface ProtectedRouteProps {
 
 export function ProtectedRoute({ children, requireSuperAdmin = false }: ProtectedRouteProps) {
   const { user, loading, isSuperAdmin } = useAuth();
-  const navigate = useNavigate();
+  const location = useLocation();
 
-  useEffect(() => {
-    if (!loading) {
-      if (!user) {
-        navigate('/login');
-      } else if (requireSuperAdmin && !isSuperAdmin) {
-        navigate('/app');
-      }
-    }
-  }, [user, loading, isSuperAdmin, requireSuperAdmin, navigate]);
+  const loginRedirect = useMemo(() => {
+    const path = `${location.pathname}${location.search}${location.hash}`;
+    const q = path ? `?returnTo=${encodeURIComponent(path)}` : '';
+    return `/login${q}`;
+  }, [location.pathname, location.search, location.hash]);
 
   if (loading) {
     return (
@@ -34,11 +30,11 @@ export function ProtectedRoute({ children, requireSuperAdmin = false }: Protecte
   }
 
   if (!user) {
-    return null;
+    return <Navigate to={loginRedirect} replace />;
   }
 
   if (requireSuperAdmin && !isSuperAdmin) {
-    return null;
+    return <Navigate to="/app" replace />;
   }
 
   return <>{children}</>;

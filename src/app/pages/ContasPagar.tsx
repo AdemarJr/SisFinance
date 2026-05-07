@@ -8,6 +8,7 @@ import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useEmpresa } from '../contexts/EmpresaContext';
+import { useSupabaseRealtimeRefresh } from '../../lib/useSupabaseRealtimeRefresh';
 
 export function ContasPagar() {
   const { empresaSelecionada } = useEmpresa();
@@ -34,11 +35,8 @@ export function ContasPagar() {
     observacoes: '',
   });
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const { data: contasData } = await db
         .from('contas_pagar')
@@ -68,9 +66,21 @@ export function ContasPagar() {
       console.error('Erro ao carregar dados:', error);
       toast.error('Erro ao carregar contas a pagar');
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   };
+
+  useEffect(() => {
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useSupabaseRealtimeRefresh(
+    ['contas_pagar', 'fornecedores', 'funcionarios'],
+    () => {
+      void loadData({ silent: true });
+    }
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

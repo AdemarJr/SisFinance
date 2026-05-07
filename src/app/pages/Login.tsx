@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -9,8 +9,23 @@ import { Alert, AlertDescription } from '../components/ui/alert';
 import { AlertCircle, Loader2, Lock, Mail } from 'lucide-react';
 import { Logo } from '../components/Logo';
 
+function safePostLoginPath(raw: string | null): string | null {
+  if (!raw || raw.length > 2048) return null;
+  let path: string;
+  try {
+    path = decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+  if (!path.startsWith('/') || path.startsWith('//')) return null;
+  if (!path.startsWith('/app')) return null;
+  if (path.includes('://')) return null;
+  return path;
+}
+
 export function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { signIn } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -26,7 +41,8 @@ export function Login() {
 
     try {
       await signIn(formData.email, formData.password);
-      navigate('/app');
+      const next = safePostLoginPath(searchParams.get('returnTo'));
+      navigate(next ?? '/app', { replace: true });
     } catch (err: any) {
       setError(err.message || 'Erro ao fazer login. Verifique suas credenciais.');
     } finally {

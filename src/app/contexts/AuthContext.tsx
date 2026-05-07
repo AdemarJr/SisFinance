@@ -62,8 +62,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    const onVisibility = () => {
+      if (!supabase || document.visibilityState !== 'visible') return;
+      void supabase.auth.getSession().then(({ data: { session } }) => {
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          void loadClienteData(session.user.id);
+        } else {
+          setClienteSistema(null);
+        }
+      });
+    };
+
+    document.addEventListener('visibilitychange', onVisibility);
+
     return () => {
       subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 

@@ -8,6 +8,7 @@ import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useEmpresa } from '../contexts/EmpresaContext';
+import { useSupabaseRealtimeRefresh } from '../../lib/useSupabaseRealtimeRefresh';
 
 export function ContasReceber() {
   const { empresaSelecionada } = useEmpresa();
@@ -27,11 +28,8 @@ export function ContasReceber() {
     status: 'Previsto' as 'Previsto' | 'Recebido' | 'Atrasado' | 'Parcial',
   });
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const { data: contasData } = await db
         .from('contas_receber')
@@ -58,9 +56,18 @@ export function ContasReceber() {
       console.error('Erro ao carregar dados:', error);
       toast.error('Erro ao carregar contas a receber');
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   };
+
+  useEffect(() => {
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useSupabaseRealtimeRefresh(['contas_receber', 'clientes'], () => {
+    void loadData({ silent: true });
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

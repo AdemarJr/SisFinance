@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Filter, Edit, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { db } from '../../lib/db';
+import { useSupabaseRealtimeRefresh } from '../../lib/useSupabaseRealtimeRefresh';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
 import { Label } from '../components/ui/label';
@@ -53,11 +54,8 @@ export function Lancamentos() {
   const [categorias, setCategorias] = useState<any[]>([]);
   const [fornecedores, setFornecedores] = useState<any[]>([]);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const { data: lancamentosData } = await db
         .from('lancamentos')
@@ -84,7 +82,7 @@ export function Lancamentos() {
         .eq('ativo', true);
 
       setCategorias([...(receitasData || []), ...(despesasData || [])]);
-      
+
       const { data: empresasData } = await db.from('empresas').select('*');
       setEmpresas(empresasData || []);
 
@@ -94,9 +92,28 @@ export function Lancamentos() {
       console.error('Erro ao carregar dados:', error);
       toast.error('Erro ao carregar lançamentos');
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   };
+
+  useEffect(() => {
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- carga inicial
+  }, []);
+
+  useSupabaseRealtimeRefresh(
+    [
+      'lancamentos',
+      'contas_financeiras',
+      'categorias_receitas',
+      'categorias_despesas',
+      'empresas',
+      'fornecedores',
+    ],
+    () => {
+      void loadData({ silent: true });
+    }
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
