@@ -117,7 +117,7 @@ export default function Funcionarios() {
         db.from('funcionarios').select('*'),
         db.from('pagamentos_extras').select('*'),
         db.from('empresas').select('*'),
-        db.from('contas').select('*'),
+        db.from('contas_financeiras').select('*'),
       ]);
       
       setFuncionarios(funcData.data || []);

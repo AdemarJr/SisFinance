@@ -5,13 +5,13 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "build:hostinger": "npm run build && npm install --prefix server --omit=dev",
+    "build:hostinger": "npm run build && npm install --prefix server && npm run build --prefix server",
     "postinstall": "npm install --prefix server --omit=dev",
     "dev": "concurrently -n api,web -c green,blue \"npm run dev:server\" \"vite\"",
     "dev:web": "vite",
     "preview": "vite preview",
     "dev:server": "npm run dev --prefix server",
-    "start": "npm run start --prefix server"
+    "start": "node server.mjs"
   },
   "engines": {
     "node": ">=18"

@@ -4,6 +4,7 @@ node_modules/
 # Build / artefatos
 dist/
 build/
+server/dist/
 *.tsbuildinfo
 
 # Variáveis de ambiente e segredos (NUNCA commitar)

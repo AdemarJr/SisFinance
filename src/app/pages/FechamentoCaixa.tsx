@@ -92,7 +92,7 @@ export default function FechamentoCaixa() {
       const [fechData, empData, contasData] = await Promise.all([
         db.from('fechamentos_caixa').select('*'),
         db.from('empresas').select('*'),
-        db.from('contas').select('*'),
+        db.from('contas_financeiras').select('*'),
       ]);
 
       setFechamentos((fechData.data || []).sort((a: Fechamento, b: Fechamento) => 
