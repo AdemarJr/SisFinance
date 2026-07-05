@@ -2,7 +2,10 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { config, isSupabaseConfigured } from './config.js';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { join, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { config, isSupabaseConfigured, isServiceRoleConfigured } from './config.js';
 import { authRoutes } from './routes/auth.js';
 import { dbRoutes } from './routes/db.js';
 import { legacyRoutes } from './routes/legacy.js';
@@ -23,12 +26,58 @@ app.get('/api/health', (c) =>
   c.json({
     status: 'ok',
     supabase: isSupabaseConfigured(),
+    serviceRole: isServiceRoleConfigured(),
   })
 );
 
 app.route('/api/auth', authRoutes);
 app.route('/api/db', dbRoutes);
 app.route('/api/make-server-b1600651', legacyRoutes);
+
+/** Produção (Hostinger): serve o build Vite + fallback SPA */
+const shouldServeStatic =
+  process.env.SERVE_STATIC === 'true' || process.env.NODE_ENV === 'production';
+
+const distDir = join(fileURLToPath(new URL('.', import.meta.url)), '../../dist');
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.json': 'application/json',
+  '.woff2': 'font/woff2',
+};
+
+if (shouldServeStatic && existsSync(distDir)) {
+  app.get('*', async (c) => {
+    const urlPath = c.req.path;
+    if (urlPath.startsWith('/api')) {
+      return c.json({ error: 'Not found' }, 404);
+    }
+
+    const safePath = urlPath.split('?')[0];
+    const filePath = join(distDir, safePath === '/' ? 'index.html' : safePath);
+
+    if (existsSync(filePath) && statSync(filePath).isFile()) {
+      const body = readFileSync(filePath);
+      const type = MIME[extname(filePath)] ?? 'application/octet-stream';
+      return c.body(body, 200, { 'Content-Type': type });
+    }
+
+    const indexHtml = join(distDir, 'index.html');
+    if (existsSync(indexHtml)) {
+      return c.html(readFileSync(indexHtml, 'utf8'));
+    }
+
+    return c.text('Frontend não encontrado. Execute npm run build.', 404);
+  });
+}
 
 serve(
   {
@@ -37,8 +86,13 @@ serve(
   },
   () => {
     console.log(`🚀 SisFinance API em http://localhost:${config.port}`);
+    if (shouldServeStatic) {
+      console.log(`📦 Servindo frontend estático de: ${distDir}`);
+    }
     if (!isSupabaseConfigured()) {
-      console.warn('⚠️  Supabase não configurado — defina variáveis em server/.env');
+      console.warn('⚠️  SUPABASE_URL não configurada');
+    } else if (!isServiceRoleConfigured()) {
+      console.warn('⚠️  Chave secret/service_role ausente — login ok, CRUD pode falhar');
     }
   }
 );

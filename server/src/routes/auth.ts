@@ -1,11 +1,14 @@
 import { Hono } from 'hono';
 import { getAdminClient, getAnonClient } from '../supabase-admin.js';
+import { isServiceRoleConfigured } from '../config.js';
 import { signAuthToken, verifyAuthToken, getBearerToken } from '../auth-jwt.js';
 import type { AuthTokenPayload } from '../auth-jwt.js';
 
 export const authRoutes = new Hono();
 
 async function loadClienteSistema(authUserId: string) {
+  if (!isServiceRoleConfigured()) return null;
+
   const supabase = getAdminClient();
   const { data, error } = await supabase
     .from('clientes_sistema')

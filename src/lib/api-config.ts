@@ -33,9 +33,38 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
   });
 }
 
+const BACKEND_HINT =
+  'Inicie o backend: npm run dev (ou npm run dev:server em outro terminal, porta 3001).';
+
+/** Evita "Unexpected token '<'" quando a API retorna HTML (index.html) em vez de JSON. */
+export async function parseApiResponse(response: Response): Promise<unknown> {
+  const text = await response.text();
+  const trimmed = text.trimStart();
+
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+    throw new Error(`Backend não encontrado. ${BACKEND_HINT}`);
+  }
+
+  if (!trimmed) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      response.ok
+        ? 'Resposta inválida da API.'
+        : `API indisponível (HTTP ${response.status}). ${BACKEND_HINT}`
+    );
+  }
+}
+
+export async function responseJson<T = unknown>(response: Response): Promise<T> {
+  return (await parseApiResponse(response)) as T;
+}
+
 export async function apiJson<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await apiFetch(path, options);
-  const data = await response.json();
+  const data = await parseApiResponse(response);
   if (!response.ok) {
     const message = (data as { error?: string })?.error || `HTTP ${response.status}`;
     throw new Error(message);

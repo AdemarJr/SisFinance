@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { apiFetch } from '../../lib/api-config';
+import { apiFetch, parseApiResponse } from '../../lib/api-config';
 import { formatarMoeda, formatarData } from '../../lib/formatters';
 import { RefreshCw, Settings, Download, CheckCircle, AlertCircle, Package, ShoppingCart, CreditCard, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -59,7 +59,7 @@ export default function IntegracaoPyrouStock() {
 
       const response = await apiFetch(`/make-server-b1600651/pyroustock/config/${empresaSelecionada}`);
 
-      const resultado = await response.json();
+      const resultado = await parseApiResponse(response);
 
       if (resultado.success) {
         setConfig(resultado.data);
@@ -82,9 +82,9 @@ export default function IntegracaoPyrouStock() {
       ]);
 
       const [prodData, vendData, caixaData] = await Promise.all([
-        prodRes.json(),
-        vendRes.json(),
-        caixaRes.json(),
+        parseApiResponse(prodRes),
+        parseApiResponse(vendRes),
+        parseApiResponse(caixaRes),
       ]);
 
       if (prodData.success) setProdutos(prodData.data);
@@ -107,7 +107,7 @@ export default function IntegracaoPyrouStock() {
         }),
       });
 
-      const resultado = await response.json();
+      const resultado = await parseApiResponse(response);
 
       if (resultado.success) {
         toast.success('Configuração salva com sucesso!');
@@ -140,7 +140,7 @@ export default function IntegracaoPyrouStock() {
         }),
       });
 
-      const resultado = await response.json();
+      const resultado = await parseApiResponse(response);
 
       if (resultado.success) {
         toast.success(resultado.message);
@@ -169,7 +169,7 @@ export default function IntegracaoPyrouStock() {
         }),
       });
 
-      const resultado = await response.json();
+      const resultado = await parseApiResponse(response);
 
       if (resultado.success) {
         toast.success(resultado.message);

@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite",
+    "build:hostinger": "npm run build && npm install --prefix server",
+    "dev": "concurrently -n api,web -c green,blue \"npm run dev:server\" \"vite\"",
+    "dev:web": "vite",
     "preview": "vite preview",
     "dev:server": "npm run dev --prefix server",
-    "dev:all": "npm run dev:server & npm run dev"
+    "start": "npm run start --prefix server"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -70,6 +72,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "4.1.12",
     "@vitejs/plugin-react": "4.7.0",
+    "concurrently": "^9.2.3",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5"
   },

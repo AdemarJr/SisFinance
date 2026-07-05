@@ -1,5 +1,42 @@
-node_modules
-dist
-server/.env
+# Dependências
+node_modules/
+
+# Build / artefatos
+dist/
+build/
+*.tsbuildinfo
+
+# Variáveis de ambiente e segredos (NUNCA commitar)
 .env
-.env.local
+.env.*
+!.env.example
+!**/.env.example
+!hostinger.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Cursor (local)
+.cursor/
+
+# Cache / temp
+.cache/
+.temp/
+*.tmp
+
+# Testes / cobertura
+coverage/

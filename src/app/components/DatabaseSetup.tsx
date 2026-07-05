@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Database, CheckCircle, AlertCircle, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
-import { apiFetch } from '../../lib/api-config';
+import { apiFetch, parseApiResponse } from '../../lib/api-config';
 import { toast } from 'sonner';
 
 interface DatabaseStatus {
@@ -25,7 +25,7 @@ export function DatabaseSetup() {
         method: 'GET',
       });
 
-      const data = await response.json();
+      const data = await parseApiResponse(response);
       if (data.success && data.status) {
         setStatus(data.status);
       }
@@ -44,7 +44,7 @@ export function DatabaseSetup() {
         method: 'POST',
       });
 
-      const data = await response.json();
+      const data = await parseApiResponse(response);
       
       if (data.success) {
         toast.success('Banco de dados inicializado com sucesso!');

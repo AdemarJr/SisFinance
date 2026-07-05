@@ -1,4 +1,4 @@
-import { apiFetch } from './api-config';
+import { apiFetch, parseApiResponse } from './api-config';
 
 export type FilterOp = 'eq' | 'gte' | 'lte' | 'in';
 
@@ -25,7 +25,7 @@ async function runQuery(payload: DbQueryPayload): Promise<DbResult> {
     method: 'POST',
     body: JSON.stringify(payload),
   });
-  return response.json();
+  return (await parseApiResponse(response)) as DbResult;
 }
 
 async function runRpc(functionName: string, params?: Record<string, unknown>): Promise<DbResult> {
@@ -33,7 +33,7 @@ async function runRpc(functionName: string, params?: Record<string, unknown>): P
     method: 'POST',
     body: JSON.stringify({ function: functionName, params }),
   });
-  return response.json();
+  return (await parseApiResponse(response)) as DbResult;
 }
 
 class SelectBuilder implements PromiseLike<DbResult> {

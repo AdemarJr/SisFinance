@@ -1,4 +1,4 @@
-import { API_BASE, apiFetch } from './api-config';
+import { apiFetch, parseApiResponse } from './api-config';
 
 export interface PyrouStockConfig {
   empresa_id: string;
@@ -33,7 +33,7 @@ const LEGACY_BASE = `${API_BASE}/make-server-b1600651`;
 class PyrouStockClient {
   private async request(endpoint: string, options: RequestInit = {}): Promise<ApiResponse> {
     const response = await apiFetch(`/make-server-b1600651${endpoint}`, options);
-    const data = await response.json();
+    const data = await parseApiResponse(response);
 
     if (!response.ok) {
       throw new Error(data.error || `HTTP Error: ${response.status}`);
