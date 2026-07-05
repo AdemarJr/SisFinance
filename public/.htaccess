@@ -1,0 +1,17 @@
+# Hostinger: Apache serve dist/ + encaminha /api para o processo Node (Passenger)
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # API → backend Node (Passenger usa http://internal/)
+  RewriteRule ^api(/.*)?$ http://internal/api$1 [P,L]
+
+  # Arquivos estáticos (JS, CSS, imagens)
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteRule ^ - [L]
+
+  # SPA — React Router (F5 e deep links)
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>

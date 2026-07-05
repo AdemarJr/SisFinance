@@ -11,8 +11,9 @@
     "dev:web": "vite",
     "preview": "vite preview",
     "dev:server": "npm run dev --prefix server",
-    "start": "node server.mjs"
+    "start": "node app.js"
   },
+  "main": "app.js",
   "engines": {
     "node": ">=18"
   },

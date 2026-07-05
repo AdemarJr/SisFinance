@@ -38,7 +38,20 @@ app.route('/api/make-server-b1600651', legacyRoutes);
 const shouldServeStatic =
   process.env.SERVE_STATIC === 'true' || process.env.NODE_ENV === 'production';
 
-const distDir = join(fileURLToPath(new URL('.', import.meta.url)), '../../dist');
+function resolveDistDir(): string {
+  const here = fileURLToPath(new URL('.', import.meta.url));
+  const candidates = [
+    join(here, '../../dist'),
+    join(process.cwd(), 'dist'),
+    join(process.cwd(), '../dist'),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(join(dir, 'index.html'))) return dir;
+  }
+  return candidates[0];
+}
+
+const distDir = resolveDistDir();
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -83,11 +96,13 @@ serve(
   {
     fetch: app.fetch,
     port: config.port,
+    hostname: '0.0.0.0',
   },
   () => {
-    console.log(`🚀 SisFinance API em http://localhost:${config.port}`);
+    console.log(`🚀 SisFinance API na porta ${config.port} (0.0.0.0)`);
     if (shouldServeStatic) {
-      console.log(`📦 Servindo frontend estático de: ${distDir}`);
+      const distOk = existsSync(join(distDir, 'index.html'));
+      console.log(`📦 Frontend estático: ${distDir} (${distOk ? 'ok' : 'NÃO ENCONTRADO'})`);
     }
     if (!isSupabaseConfigured()) {
       console.warn('⚠️  SUPABASE_URL não configurada');
