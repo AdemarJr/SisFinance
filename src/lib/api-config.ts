@@ -33,8 +33,9 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
   });
 }
 
-const BACKEND_HINT =
-  'Inicie o backend: npm run dev (ou npm run dev:server em outro terminal, porta 3001).';
+const BACKEND_HINT = import.meta.env.PROD
+  ? 'A API não respondeu. No Hostinger, confira: Start command = npm start, Build = npm run build:hostinger, NODE_ENV=production e SERVE_STATIC=true.'
+  : 'Inicie o backend: npm run dev (ou npm run dev:server em outro terminal, porta 3001).';
 
 /** Evita "Unexpected token '<'" quando a API retorna HTML (index.html) em vez de JSON. */
 export async function parseApiResponse(response: Response): Promise<unknown> {

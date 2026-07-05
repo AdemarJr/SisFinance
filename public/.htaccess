@@ -1,8 +1,10 @@
 # Apache — fallback para SPA (F5 e link direto sem 404)
+# /api/* NÃO deve ir para index.html — o backend Node atende essas rotas
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
   RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_URI} !^/api [NC]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule . /index.html [L]
