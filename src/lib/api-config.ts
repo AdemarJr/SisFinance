@@ -34,13 +34,19 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
 }
 
 const BACKEND_HINT = import.meta.env.PROD
-  ? 'A API não respondeu. No Hostinger, confira: Start command = npm start, Build = npm run build:hostinger, NODE_ENV=production e SERVE_STATIC=true.'
+  ? 'Backend indisponível (503/504). No Hostinger: Framework=Other, Entry=app.js, Build=npm run build, Start=npm start. Depois Redeploy + Restart.'
   : 'Inicie o backend: npm run dev (ou npm run dev:server em outro terminal, porta 3001).';
 
 /** Evita "Unexpected token '<'" quando a API retorna HTML (index.html) em vez de JSON. */
 export async function parseApiResponse(response: Response): Promise<unknown> {
   const text = await response.text();
   const trimmed = text.trimStart();
+
+  if (response.status === 503 || response.status === 504) {
+    throw new Error(
+      `Backend offline ou não iniciou (HTTP ${response.status}). ${BACKEND_HINT}`
+    );
+  }
 
   if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
     throw new Error(`Backend não encontrado. ${BACKEND_HINT}`);
