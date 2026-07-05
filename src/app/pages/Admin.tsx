@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router';
 import { db } from '../../lib/db';
-import { supabase } from '../../lib/supabase';
+import { apiJson } from '../../lib/api-config';
 import { formatarMoeda } from '../../lib/formatters';
 import { toast } from 'sonner';
 import {
@@ -51,6 +51,7 @@ interface Plano {
 
 interface ClienteSistema {
   id: string;
+  auth_user_id?: string;
   nome_completo: string;
   email: string;
   telefone?: string;
@@ -125,16 +126,16 @@ export function Admin() {
 
       // Carregar total de empresas para cada cliente
       const clientesComTotal = await Promise.all(
-        (clientesData || []).map(async (cliente) => {
-          const { count } = await db
+        (clientesData || []).map(async (cliente: ClienteSistema) => {
+          const { data: empresasData } = await db
             .from('empresas')
-            .select('*', { count: 'exact', head: true })
+            .select('id')
             .eq('cliente_sistema_id', cliente.id)
             .eq('ativo', true);
 
           return {
             ...cliente,
-            total_empresas: count || 0,
+            total_empresas: empresasData?.length || 0,
           };
         })
       );
@@ -204,47 +205,34 @@ export function Admin() {
 
         // Atualizar senha se fornecida
         if (formData.senha) {
-          const cliente = clientes.find(c => c.id === editingId);
-          if (cliente?.email) {
-            const { error: authError } = await supabase.auth.admin.updateUserById(
-              cliente.id,
-              { password: formData.senha }
-            );
-            if (authError) console.error('Erro ao atualizar senha:', authError);
+          const cliente = clientes.find((c) => c.id === editingId);
+          if (cliente?.auth_user_id) {
+            try {
+              await apiJson(`/auth/admin/users/${cliente.auth_user_id}/password`, {
+                method: 'PUT',
+                body: JSON.stringify({ password: formData.senha }),
+              });
+            } catch (authError) {
+              console.error('Erro ao atualizar senha:', authError);
+            }
           }
         }
 
         toast.success('Cliente atualizado com sucesso!');
       } else {
-        // Criar novo cliente
-        // 1. Criar usuário no Supabase Auth
-        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-          email: formData.email,
-          password: formData.senha,
-          email_confirm: true, // Auto-confirmar email
-          user_metadata: {
-            nome_completo: formData.nome_completo,
-          },
-        });
-
-        if (authError) throw authError;
-
-        // 2. Criar registro em clientes_sistema
-        const { error: clienteError } = await db
-          .from('clientes_sistema')
-          .insert({
-            auth_user_id: authData.user.id,
-            nome_completo: formData.nome_completo,
+        await apiJson('/auth/admin/users', {
+          method: 'POST',
+          body: JSON.stringify({
             email: formData.email,
+            password: formData.senha,
+            nome_completo: formData.nome_completo,
             telefone: formData.telefone,
             documento: formData.documento,
             plano_id: formData.plano_id,
             limite_empresas: planoSelecionado.limite_empresas,
             status: formData.status,
-            is_super_admin: false,
-          });
-
-        if (clienteError) throw clienteError;
+          }),
+        });
 
         toast.success('Cliente criado com sucesso!');
       }
@@ -266,12 +254,12 @@ export function Admin() {
 
     try {
       // Verificar se cliente tem empresas
-      const { count } = await db
+      const { data: empresasData } = await db
         .from('empresas')
-        .select('*', { count: 'exact', head: true })
+        .select('id')
         .eq('cliente_sistema_id', id);
 
-      if (count && count > 0) {
+      if (empresasData && empresasData.length > 0) {
         toast.error('Não é possível excluir cliente com empresas cadastradas');
         return;
       }

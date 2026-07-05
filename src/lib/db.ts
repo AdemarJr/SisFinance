@@ -1,13 +1,12 @@
-import { supabase, isConfigured } from './supabase';
 import { mockApiMulti } from './mock-data-multi';
+import { createApiDbClient } from './api-db-client';
 
-// Retorna a API apropriada (Supabase real ou mock)
-export const db = isConfigured && supabase ? supabase : mockApiMulti;
+/** Usar mock local (localStorage) — defina VITE_USE_MOCK=true */
+const useMock = import.meta.env.VITE_USE_MOCK === 'true';
 
-// Indica se está usando dados reais ou mock
-export const isUsingMockData = !isConfigured;
+export const db = useMock ? mockApiMulti : createApiDbClient();
+export const isUsingMockData = useMock;
 
-// Helper para debug - mostra qual banco está sendo usado
 if (typeof window !== 'undefined') {
-  console.log('🗄️ Database:', isConfigured ? 'Supabase (Real)' : 'Mock Data');
+  console.log('🗄️ Database:', useMock ? 'Mock Data' : 'API Backend');
 }

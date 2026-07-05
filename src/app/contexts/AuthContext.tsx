@@ -1,7 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabase } from '../../lib/supabase';
-import { User } from '@supabase/supabase-js';
-import { db } from '../../lib/db';
+import { API_BASE, apiJson, getAuthToken, setAuthToken } from '../../lib/api-config';
 
 interface ClienteSistema {
   id: string;
@@ -26,8 +24,13 @@ interface ClienteSistema {
   };
 }
 
+interface AuthUser {
+  id: string;
+  email?: string;
+}
+
 interface AuthContextType {
-  user: User | null;
+  user: AuthUser | null;
   clienteSistema: ClienteSistema | null;
   loading: boolean;
   isSuperAdmin: boolean;
@@ -39,141 +42,80 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [clienteSistema, setClienteSistema] = useState<ClienteSistema | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // Verificar sessão atual
-    checkUser();
+  const applySession = (data: {
+    user: AuthUser;
+    clienteSistema: ClienteSistema | null;
+    isSuperAdmin?: boolean;
+  }) => {
+    setUser(data.user);
+    setClienteSistema(data.clienteSistema);
+  };
 
-    // Escutar mudanças de autenticação (apenas se supabase estiver configurado)
-    if (!supabase) {
-      setLoading(false);
+  const loadSession = async () => {
+    const token = getAuthToken();
+    if (!token) {
+      setUser(null);
+      setClienteSistema(null);
       return;
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        loadClienteData(session.user.id);
-      } else {
-        setClienteSistema(null);
-      }
-    });
+    try {
+      const data = await apiJson<{
+        user: AuthUser;
+        clienteSistema: ClienteSistema | null;
+        isSuperAdmin: boolean;
+      }>('/auth/me');
+      applySession(data);
+    } catch {
+      setAuthToken(null);
+      setUser(null);
+      setClienteSistema(null);
+    }
+  };
+
+  useEffect(() => {
+    void loadSession().finally(() => setLoading(false));
 
     const onVisibility = () => {
-      if (!supabase || document.visibilityState !== 'visible') return;
-      void supabase.auth.getSession().then(({ data: { session } }) => {
-        setUser(session?.user ?? null);
-        if (session?.user) {
-          void loadClienteData(session.user.id);
-        } else {
-          setClienteSistema(null);
-        }
-      });
+      if (document.visibilityState === 'visible' && getAuthToken()) {
+        void loadSession();
+      }
     };
-
     document.addEventListener('visibilitychange', onVisibility);
-
-    return () => {
-      subscription.unsubscribe();
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
+    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
-  const checkUser = async () => {
-    try {
-      if (!supabase) {
-        setLoading(false);
-        return;
-      }
-      
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await loadClienteData(session.user.id);
-      }
-    } catch (error) {
-      console.error('Erro ao verificar usuário:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadClienteData = async (authUserId: string) => {
-    try {
-      const { data: clienteData, error } = await db
-        .from('clientes_sistema')
-        .select(`
-          *,
-          plano:planos_assinatura(*)
-        `)
-        .eq('auth_user_id', authUserId)
-        .single();
-
-      if (error) {
-        // Se a tabela não existe, usar modo silencioso
-        // O sistema funciona normalmente sem os dados de plano
-        if (error.code === 'PGRST116' || error.code === 'PGRST205' || error.message?.includes('does not exist')) {
-          // Silenciosamente ignorar - tabela não criada ainda
-          return;
-        }
-        
-        // Outros erros (como registro não encontrado) também são silenciosos
-        // O usuário pode não ter registro em clientes_sistema ainda
-        return;
-      }
-
-      setClienteSistema(clienteData);
-    } catch (error) {
-      // Erro de rede ou outro - não logar para não poluir console
-      return;
-    }
-  };
-
   const refreshClienteData = async () => {
-    if (user) {
-      await loadClienteData(user.id);
-    }
+    await loadSession();
   };
 
   const signIn = async (email: string, password: string) => {
-    try {
-      if (!supabase) {
-        throw new Error('Supabase não está configurado');
-      }
-      
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+    const data = await apiJson<{
+      token: string;
+      user: AuthUser;
+      clienteSistema: ClienteSistema | null;
+    }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
 
-      if (error) throw error;
-
-      if (data.user) {
-        await loadClienteData(data.user.id);
-      }
-    } catch (error: any) {
-      console.error('Erro ao fazer login:', error);
-      throw new Error(error.message || 'Erro ao fazer login');
-    }
+    setAuthToken(data.token);
+    applySession({ user: data.user, clienteSistema: data.clienteSistema });
   };
 
   const signOut = async () => {
     try {
-      if (!supabase) {
-        throw new Error('Supabase não está configurado');
-      }
-      
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      setUser(null);
-      setClienteSistema(null);
-    } catch (error: any) {
-      console.error('Erro ao fazer logout:', error);
-      throw new Error(error.message || 'Erro ao fazer logout');
+      await apiJson('/auth/logout', { method: 'POST' });
+    } catch {
+      // ignora erro de logout remoto
     }
+    setAuthToken(null);
+    setUser(null);
+    setClienteSistema(null);
   };
 
   const value = {
@@ -195,4 +137,14 @@ export function useAuth() {
     throw new Error('useAuth deve ser usado dentro de um AuthProvider');
   }
   return context;
+}
+
+// Health check da API (útil para diagnóstico)
+export async function checkApiHealth(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/health`);
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

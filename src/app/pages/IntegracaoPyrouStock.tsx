@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { apiFetch } from '../../lib/api-config';
 import { formatarMoeda, formatarData } from '../../lib/formatters';
 import { RefreshCw, Settings, Download, CheckCircle, AlertCircle, Package, ShoppingCart, CreditCard, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,8 +12,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
 import { useEmpresa } from '../contexts/EmpresaContext';
-
-const API_BASE = `https://${projectId}.supabase.co/functions/v1/make-server-b1600651`;
 
 interface Config {
   empresa_id: string;
@@ -59,9 +57,7 @@ export default function IntegracaoPyrouStock() {
     try {
       setLoading(true);
 
-      const response = await fetch(`${API_BASE}/pyroustock/config/${empresaSelecionada}`, {
-        headers: { 'Authorization': `Bearer ${publicAnonKey}` },
-      });
+      const response = await apiFetch(`/make-server-b1600651/pyroustock/config/${empresaSelecionada}`);
 
       const resultado = await response.json();
 
@@ -80,15 +76,9 @@ export default function IntegracaoPyrouStock() {
   const loadDados = async () => {
     try {
       const [prodRes, vendRes, caixaRes] = await Promise.all([
-        fetch(`${API_BASE}/pyroustock/produtos/${empresaSelecionada}`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` },
-        }),
-        fetch(`${API_BASE}/pyroustock/vendas/${empresaSelecionada}`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` },
-        }),
-        fetch(`${API_BASE}/pyroustock/caixas/${empresaSelecionada}`, {
-          headers: { 'Authorization': `Bearer ${publicAnonKey}` },
-        }),
+        apiFetch(`/make-server-b1600651/pyroustock/produtos/${empresaSelecionada}`),
+        apiFetch(`/make-server-b1600651/pyroustock/vendas/${empresaSelecionada}`),
+        apiFetch(`/make-server-b1600651/pyroustock/caixas/${empresaSelecionada}`),
       ]);
 
       const [prodData, vendData, caixaData] = await Promise.all([
@@ -109,12 +99,8 @@ export default function IntegracaoPyrouStock() {
     e.preventDefault();
 
     try {
-      const response = await fetch(`${API_BASE}/pyroustock/config`, {
+      const response = await apiFetch('/make-server-b1600651/pyroustock/config', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           empresa_id: empresaSelecionada,
           ...formData,
@@ -145,12 +131,8 @@ export default function IntegracaoPyrouStock() {
     try {
       setSyncing(true);
 
-      const response = await fetch(`${API_BASE}/pyroustock/sync`, {
+      const response = await apiFetch('/make-server-b1600651/pyroustock/sync', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           empresa_id: empresaSelecionada,
           start_date: syncPeriod.start_date || undefined,
@@ -179,12 +161,8 @@ export default function IntegracaoPyrouStock() {
     try {
       setImporting(true);
 
-      const response = await fetch(`${API_BASE}/pyroustock/importar`, {
+      const response = await apiFetch('/make-server-b1600651/pyroustock/importar', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${publicAnonKey}`,
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           empresa_id: empresaSelecionada,
           tipo,

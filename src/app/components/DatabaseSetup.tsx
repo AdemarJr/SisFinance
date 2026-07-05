@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Database, CheckCircle, AlertCircle, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { apiFetch } from '../../lib/api-config';
 import { toast } from 'sonner';
 
 interface DatabaseStatus {
@@ -21,16 +21,9 @@ export function DatabaseSetup() {
   const checkStatus = async () => {
     setChecking(true);
     try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-b1600651/db-status`,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const response = await apiFetch('/make-server-b1600651/db-status', {
+        method: 'GET',
+      });
 
       const data = await response.json();
       if (data.success && data.status) {
@@ -47,16 +40,9 @@ export function DatabaseSetup() {
   const initializeDatabase = async () => {
     setLoading(true);
     try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-b1600651/init-db`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const response = await apiFetch('/make-server-b1600651/init-db', {
+        method: 'POST',
+      });
 
       const data = await response.json();
       

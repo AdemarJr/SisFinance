@@ -1,13 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { supabase } from './supabase';
 import { isUsingMockData } from './db';
 
+const POLL_INTERVAL_MS = 8000;
+
 /**
- * Reexecuta `refresh` quando há INSERT/UPDATE/DELETE nas tabelas indicadas (Supabase Realtime).
- * No modo mock ou sem cliente, não faz nada.
- *
- * No projeto Supabase é preciso habilitar a tabela para Replication (Realtime),
- * senão este canal não recebe eventos.
+ * Atualiza dados periodicamente quando há alterações em outras sessões.
+ * Substitui Supabase Realtime — polling leve via recarregamento da tela.
  */
 export function useSupabaseRealtimeRefresh(tables: string[], refresh: () => void) {
   const refreshRef = useRef(refresh);
@@ -16,25 +14,17 @@ export function useSupabaseRealtimeRefresh(tables: string[], refresh: () => void
   const depsKey = JSON.stringify([...new Set(tables.filter(Boolean))].sort());
 
   useEffect(() => {
-    if (isUsingMockData || !supabase) return;
+    if (isUsingMockData) return;
 
-    const uniqueTables = [...new Set(JSON.parse(depsKey) as string[])];
-    if (uniqueTables.length === 0) return;
+    const tick = () => refreshRef.current();
+    const id = window.setInterval(tick, POLL_INTERVAL_MS);
 
-    const channelName = `realtime:${uniqueTables.join(':')}`;
-    const channel = supabase.channel(channelName);
-    const handler = () => {
-      refreshRef.current();
-    };
-
-    for (const table of uniqueTables) {
-      channel.on('postgres_changes', { event: '*', schema: 'public', table }, handler);
-    }
-
-    channel.subscribe();
+    const onFocus = () => tick();
+    window.addEventListener('focus', onFocus);
 
     return () => {
-      void supabase.removeChannel(channel);
+      window.clearInterval(id);
+      window.removeEventListener('focus', onFocus);
     };
   }, [depsKey]);
 }
