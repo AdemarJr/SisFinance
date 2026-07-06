@@ -1,4 +1,8 @@
-export const API_BASE = import.meta.env.VITE_API_URL || '/api';
+const PRODUCTION_API_URL = 'https://sisfinance-api.up.railway.app/api';
+
+export const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? PRODUCTION_API_URL : '/api');
 
 export const AUTH_TOKEN_KEY = 'sisfinance_auth_token';
 
@@ -34,8 +38,8 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
 }
 
 const BACKEND_HINT = import.meta.env.PROD
-  ? 'Backend indisponível (503/504). No Hostinger: Framework=Other, Entry=app.js, Build=npm run build, Start=npm start. Depois Redeploy + Restart.'
-  : 'Inicie o backend: npm run dev (ou npm run dev:server em outro terminal, porta 3001).';
+  ? 'API indisponível. Verifique VITE_API_URL no build e se o backend (SisFinance-API) está no ar.'
+  : 'Inicie a API: cd ../SisFinance-API && npm run dev (porta 3001).';
 
 /** Evita "Unexpected token '<'" quando a API retorna HTML (index.html) em vez de JSON. */
 export async function parseApiResponse(response: Response): Promise<unknown> {

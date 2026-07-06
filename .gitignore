@@ -4,7 +4,6 @@ node_modules/
 # Build / artefatos
 dist/
 build/
-server/dist/
 *.tsbuildinfo
 
 # Variáveis de ambiente e segredos (NUNCA commitar)
@@ -41,3 +40,7 @@ Thumbs.db
 
 # Testes / cobertura
 coverage/
+
+# Backend separado (repo próprio / Railway)
+SisFinance-API/
+sisfinance-api/
