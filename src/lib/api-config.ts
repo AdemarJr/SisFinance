@@ -1,18 +1,25 @@
 const PRODUCTION_API_URL = 'https://sisfinance-api.up.railway.app/api';
 
-/** Garante sufixo `/api` em minúsculas (evita /API no Hostinger). */
-function normalizeApiBase(base: string): string {
-  const trimmed = base.replace(/\/$/, '');
-  if (/\/api$/i.test(trimmed)) {
-    return trimmed.replace(/\/api$/i, '/api');
-  }
-  return trimmed;
+/** Limpa VITE_API_URL (espaços, emojis, texto extra colado do README). */
+function sanitizeApiBase(raw: string): string {
+  const match = raw.trim().match(/https?:\/\/[^\s\u{1F300}-\u{1FAFF}\u2600-\u27BF]+/iu);
+  if (!match) return raw.trim().replace(/\/$/, '');
+  let url = match[0].replace(/\/$/, '');
+  if (/\/api$/i.test(url)) url = url.replace(/\/api$/i, '/api');
+  else if (!url.endsWith('/api')) url = `${url}/api`;
+  return url;
 }
 
-export const API_BASE = normalizeApiBase(
-  import.meta.env.VITE_API_URL ||
-    (import.meta.env.PROD ? PRODUCTION_API_URL : '/api')
-);
+function resolveApiBase(): string {
+  const envUrl = import.meta.env.VITE_API_URL?.trim();
+  if (envUrl) {
+    const sanitized = sanitizeApiBase(envUrl);
+    if (sanitized.startsWith('http')) return sanitized;
+  }
+  return import.meta.env.PROD ? PRODUCTION_API_URL : '/api';
+}
+
+export const API_BASE = resolveApiBase();
 
 export const AUTH_TOKEN_KEY = 'sisfinance_auth_token';
 
