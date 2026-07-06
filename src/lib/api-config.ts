@@ -1,8 +1,18 @@
 const PRODUCTION_API_URL = 'https://sisfinance-api.up.railway.app/api';
 
-export const API_BASE =
+/** Garante sufixo `/api` em minúsculas (evita /API no Hostinger). */
+function normalizeApiBase(base: string): string {
+  const trimmed = base.replace(/\/$/, '');
+  if (/\/api$/i.test(trimmed)) {
+    return trimmed.replace(/\/api$/i, '/api');
+  }
+  return trimmed;
+}
+
+export const API_BASE = normalizeApiBase(
   import.meta.env.VITE_API_URL ||
-  (import.meta.env.PROD ? PRODUCTION_API_URL : '/api');
+    (import.meta.env.PROD ? PRODUCTION_API_URL : '/api')
+);
 
 export const AUTH_TOKEN_KEY = 'sisfinance_auth_token';
 
