@@ -17,7 +17,8 @@ export function formatarNumero(value: number, decimals: number = 2): string {
  * @returns String formatada com símbolo de moeda
  */
 export function formatarMoeda(value: number): string {
-  return value.toLocaleString('pt-BR', {
+  const n = Number.isFinite(value) ? value : 0;
+  return n.toLocaleString('pt-BR', {
     style: 'currency',
     currency: 'BRL',
   });
@@ -30,7 +31,8 @@ export function formatarMoeda(value: number): string {
  * @returns String formatada com símbolo de porcentagem
  */
 export function formatarPorcentagem(value: number, decimals: number = 2): string {
-  return `${formatarNumero(value, decimals)}%`;
+  const n = Number.isFinite(value) ? value : 0;
+  return `${formatarNumero(n, decimals)}%`;
 }
 
 /**

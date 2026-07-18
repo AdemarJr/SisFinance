@@ -1,10 +1,11 @@
 import { apiFetch, parseApiResponse } from './api-config';
 
-export type FilterOp = 'eq' | 'gte' | 'lte' | 'in';
+export type FilterOp = 'eq' | 'gte' | 'lte' | 'in' | 'not';
 
 export interface DbFilter {
   op: FilterOp;
   column: string;
+  /** Para `not`: [operator, value] — ex.: ['is', null] */
   value: unknown;
 }
 
@@ -60,6 +61,12 @@ class SelectBuilder implements PromiseLike<DbResult> {
 
   in(column: string, values: unknown[]) {
     this.payload.filters!.push({ op: 'in', column, value: values });
+    return this;
+  }
+
+  /** Equivalente ao supabase `.not(column, operator, value)` */
+  not(column: string, operator: string, value: unknown) {
+    this.payload.filters!.push({ op: 'not', column, value: [operator, value] });
     return this;
   }
 

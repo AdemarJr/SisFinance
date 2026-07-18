@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { db } from '../../lib/db';
 import { formatarMoeda, formatarNumero, formatarPorcentagem, formatarInteiro } from '../../lib/formatters';
-import { gerarRelatorioCompleto, type AgingData } from '../../lib/relatorios-helpers';
+import { gerarRelatorioCompleto, calcularIntervaloPeriodo, type AgingData } from '../../lib/relatorios-helpers';
 import {
   FileText,
   Download,
@@ -143,16 +143,21 @@ export function Relatorios() {
   const [dados, setDados] = useState<RelatorioData | null>(null);
   const [agingData, setAgingData] = useState<AgingData[]>([]);
   const [gastosPorFornecedor, setGastosPorFornecedor] = useState<any[]>([]);
+  const [periodoLabel, setPeriodoLabel] = useState('');
 
   useEffect(() => {
-    if (empresaSelecionada && empresaAtual) {
-      carregarDados();
+    if (!empresaSelecionada) {
+      setLoading(false);
+      setDados(null);
+      setAgingData([]);
+      setGastosPorFornecedor([]);
+      return;
     }
-  }, [empresaSelecionada, empresaAtual, periodo]);
+    void carregarDados();
+  }, [empresaSelecionada, periodo]);
 
   const carregarGastosPorFornecedor = async (dataInicio: string, dataFim: string) => {
     try {
-      // Buscar todas as contas a pagar do período
       const { data: contasPagar, error: erroContas } = await db
         .from('contas_pagar')
         .select('*, fornecedores(nome)')
@@ -162,84 +167,56 @@ export function Relatorios() {
 
       if (erroContas) {
         console.error('Erro ao carregar contas a pagar:', erroContas);
-        setGastosPorFornecedor([]);
-        return;
       }
 
-      // Buscar lançamentos com fornecedor do período
       const { data: lancamentos, error: erroLancamentos } = await db
         .from('lancamentos')
         .select('*, fornecedores(nome)')
         .eq('empresa_id', empresaSelecionada)
         .eq('tipo', 'Despesa')
         .gte('data', dataInicio)
-        .lte('data', dataFim)
-        .not('fornecedor_id', 'is', null);
+        .lte('data', dataFim);
 
       if (erroLancamentos) {
         console.error('Erro ao carregar lançamentos:', erroLancamentos);
       }
 
-      // Agrupar por fornecedor
-      const gastosPorFornecedorMap = new Map();
+      const gastosPorFornecedorMap = new Map<string, { nome: string; total: number; quantidade: number }>();
 
-      // Processar contas a pagar
-      if (contasPagar) {
-        contasPagar.forEach((conta: any) => {
-          const fornecedorNome = conta.fornecedores?.nome || 'Sem Fornecedor';
-          const valor = Number(conta.valor_total || 0);
-          
-          if (gastosPorFornecedorMap.has(fornecedorNome)) {
-            gastosPorFornecedorMap.set(fornecedorNome, {
-              nome: fornecedorNome,
-              total: gastosPorFornecedorMap.get(fornecedorNome).total + valor,
-              quantidade: gastosPorFornecedorMap.get(fornecedorNome).quantidade + 1,
-            });
-          } else {
-            gastosPorFornecedorMap.set(fornecedorNome, {
-              nome: fornecedorNome,
-              total: valor,
-              quantidade: 1,
-            });
-          }
-        });
-      }
+      const addGasto = (nome: string, valor: number) => {
+        if (!Number.isFinite(valor) || valor <= 0) return;
+        const atual = gastosPorFornecedorMap.get(nome);
+        if (atual) {
+          atual.total += valor;
+          atual.quantidade += 1;
+        } else {
+          gastosPorFornecedorMap.set(nome, { nome, total: valor, quantidade: 1 });
+        }
+      };
 
-      // Processar lançamentos
-      if (lancamentos) {
-        lancamentos.forEach((lanc: any) => {
+      ((contasPagar as any[]) || []).forEach((conta) => {
+        const fornecedorNome = conta.fornecedores?.nome || 'Sem Fornecedor';
+        const valor = Number(conta.valor_total ?? conta.valor_pago ?? conta.valor ?? 0);
+        addGasto(fornecedorNome, valor);
+      });
+
+      ((lancamentos as any[]) || [])
+        .filter((lanc) => lanc.fornecedor_id)
+        .forEach((lanc) => {
           const fornecedorNome = lanc.fornecedores?.nome || 'Outros';
-          const valor = Number(lanc.valor || 0);
-          
-          if (gastosPorFornecedorMap.has(fornecedorNome)) {
-            gastosPorFornecedorMap.set(fornecedorNome, {
-              nome: fornecedorNome,
-              total: gastosPorFornecedorMap.get(fornecedorNome).total + valor,
-              quantidade: gastosPorFornecedorMap.get(fornecedorNome).quantidade + 1,
-            });
-          } else {
-            gastosPorFornecedorMap.set(fornecedorNome, {
-              nome: fornecedorNome,
-              total: valor,
-              quantidade: 1,
-            });
-          }
+          addGasto(fornecedorNome, Number(lanc.valor || 0));
         });
-      }
 
-      // Converter para array e ordenar por total
-      const gastosArray = Array.from(gastosPorFornecedorMap.values())
-        .sort((a, b) => b.total - a.total);
-
-      // Calcular percentuais
+      const gastosArray = Array.from(gastosPorFornecedorMap.values()).sort(
+        (a, b) => b.total - a.total
+      );
       const totalGeral = gastosArray.reduce((sum, f) => sum + f.total, 0);
-      const gastosComPercentual = gastosArray.map(f => ({
-        ...f,
-        percentual: totalGeral > 0 ? (f.total / totalGeral) * 100 : 0,
-      }));
-
-      setGastosPorFornecedor(gastosComPercentual);
-      console.log('✅ Gastos por fornecedor carregados:', gastosComPercentual);
+      setGastosPorFornecedor(
+        gastosArray.map((f) => ({
+          ...f,
+          percentual: totalGeral > 0 ? (f.total / totalGeral) * 100 : 0,
+        }))
+      );
     } catch (error) {
       console.error('Erro ao carregar gastos por fornecedor:', error);
       setGastosPorFornecedor([]);
@@ -247,59 +224,36 @@ export function Relatorios() {
   };
 
   const carregarDados = async () => {
-    if (!empresaSelecionada || !empresaAtual) return;
-    
+    if (!empresaSelecionada) return;
+
     setLoading(true);
     try {
-      // Calcular datas do período selecionado
-      const hoje = new Date();
-      let dataInicio: Date;
-      let dataFim: Date = hoje;
-      
-      switch (periodo) {
-        case 'mes-atual':
-          dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-          break;
-        case 'trimestre':
-          dataInicio = new Date(hoje.getFullYear(), hoje.getMonth() - 2, 1);
-          break;
-        case 'ano':
-          dataInicio = new Date(hoje.getFullYear(), 0, 1);
-          break;
-        default:
-          dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-      }
-      
-      console.log('📊 Gerando relatório para período:', {
-        empresa: empresaAtual.nome,
+      const { dataInicio, dataFim } = calcularIntervaloPeriodo(periodo);
+      setPeriodoLabel(`${dataInicio} → ${dataFim}`);
+
+      console.log('📊 Gerando relatório:', {
+        empresa: empresaAtual?.nome || empresaSelecionada,
         empresaId: empresaSelecionada,
         periodo,
-        dataInicio: dataInicio.toISOString().split('T')[0],
-        dataFim: dataFim.toISOString().split('T')[0],
+        dataInicio,
+        dataFim,
       });
-      
-      // Gerar relatório completo com dados reais do Supabase
+
       const dadosRelatorio = await gerarRelatorioCompleto({
-        empresaId: empresaSelecionada, // empresaSelecionada já é o ID
-        dataInicio: dataInicio.toISOString().split('T')[0],
-        dataFim: dataFim.toISOString().split('T')[0],
+        empresaId: empresaSelecionada,
+        dataInicio,
+        dataFim,
       });
-      
+
       setDados(dadosRelatorio);
       setAgingData(dadosRelatorio.agingData);
-      
-      // Carregar gastos por fornecedor
-      await carregarGastosPorFornecedor(dataInicio.toISOString().split('T')[0], dataFim.toISOString().split('T')[0]);
-      
+      await carregarGastosPorFornecedor(dataInicio, dataFim);
       console.log('✅ Relatório gerado com sucesso!');
     } catch (error) {
       console.error('❌ Erro ao carregar dados do relatório:', error);
-      toast.error('Erro ao gerar relatório. Usando dados vazios.');
-      
-      // Fallback para dados zerados em caso de erro
-      console.log('⚠️ Usando dados zerados como fallback');
-      const dadosSimulados: RelatorioData = {
-        // DRE
+      toast.error('Erro ao gerar relatório. Verifique a conexão com a API.');
+
+      setDados({
         receitaBruta: 0,
         impostos: 0,
         receitaLiquida: 0,
@@ -314,39 +268,27 @@ export function Relatorios() {
         lair: 0,
         impostoRenda: 0,
         lucroLiquido: 0,
-
-        // Fluxo de Caixa
         saldoInicial: 0,
         entradas: 0,
         saidas: 0,
         saldoFinal: 0,
         burnRate: 0,
-
-        // KPIs
         margemBruta: 0,
         margemLiquida: 0,
         roi: 0,
         pontoEquilibrio: 0,
-
-        // Prazos Médios
         pmp: 0,
         pmr: 0,
         pme: 0,
-
-        // Inadimplência
         totalReceber: 0,
         totalVencido: 0,
         percentualInadimplencia: 0,
         provisaoDevedoresDuvidosos: 0,
-
-        // Comparativos
         orcadoReceita: 0,
         orcadoDespesas: 0,
         desvioReceita: 0,
         desvioDespesas: 0,
-      };
-
-      setDados(dadosSimulados);
+      });
       setAgingData([
         { periodo: 'A Vencer', valor: 0, percentual: 0, quantidade: 0 },
         { periodo: '1-30 dias', valor: 0, percentual: 0, quantidade: 0 },
@@ -354,6 +296,7 @@ export function Relatorios() {
         { periodo: '61-90 dias', valor: 0, percentual: 0, quantidade: 0 },
         { periodo: '> 90 dias', valor: 0, percentual: 0, quantidade: 0 },
       ]);
+      setGastosPorFornecedor([]);
     } finally {
       setLoading(false);
     }
@@ -386,6 +329,7 @@ export function Relatorios() {
   }
 
   // Dados para gráficos
+  const receitaBase = dados.receitaLiquida || 1;
   const dreData = [
     { nome: 'Receita Bruta', valor: dados.receitaBruta },
     { nome: 'Impostos', valor: -dados.impostos },
@@ -404,7 +348,7 @@ export function Relatorios() {
   const margemData = [
     { nome: 'Receita Líquida', valor: dados.receitaLiquida, margem: 100 },
     { nome: 'Margem Contrib.', valor: dados.margemContribuicao, margem: dados.margemBruta },
-    { nome: 'EBITDA', valor: dados.ebitda, margem: (dados.ebitda / dados.receitaLiquida) * 100 },
+    { nome: 'EBITDA', valor: dados.ebitda, margem: (dados.ebitda / receitaBase) * 100 },
     { nome: 'Lucro Líquido', valor: dados.lucroLiquido, margem: dados.margemLiquida },
   ];
 
@@ -445,34 +389,49 @@ export function Relatorios() {
 
       {/* Filtros e Ações */}
       <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant={periodo === 'semana' ? 'default' : 'outline'}
+            onClick={() => setPeriodo('semana')}
+            size="sm"
+          >
+            Semanal
+          </Button>
           <Button
             variant={periodo === 'mes-atual' ? 'default' : 'outline'}
             onClick={() => setPeriodo('mes-atual')}
             size="sm"
           >
-            Mês Atual
+            Mensal
           </Button>
           <Button
             variant={periodo === 'trimestre' ? 'default' : 'outline'}
             onClick={() => setPeriodo('trimestre')}
             size="sm"
           >
-            Trimestre
+            Trimestral
           </Button>
           <Button
             variant={periodo === 'ano' ? 'default' : 'outline'}
             onClick={() => setPeriodo('ano')}
             size="sm"
           >
-            Ano
+            Anual
           </Button>
         </div>
 
-        <Button onClick={exportarPDF} variant="outline" className="gap-2">
-          <Download className="h-4 w-4" />
-          Exportar PDF
-        </Button>
+        <div className="flex items-center gap-3">
+          {periodoLabel && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <Calendar className="h-3.5 w-3.5" />
+              {periodoLabel}
+            </span>
+          )}
+          <Button onClick={exportarPDF} variant="outline" className="gap-2">
+            <Download className="h-4 w-4" />
+            Exportar PDF
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="sumario" className="space-y-6">
@@ -495,7 +454,15 @@ export function Relatorios() {
                 Sumário Executivo
               </CardTitle>
               <CardDescription>
-                Visão macro da saúde financeira - {periodo.replace('-', ' ').toUpperCase()}
+                Visão macro da saúde financeira —{' '}
+                {periodo === 'semana'
+                  ? 'SEMANAL'
+                  : periodo === 'trimestre'
+                    ? 'TRIMESTRAL'
+                    : periodo === 'ano'
+                      ? 'ANUAL'
+                      : 'MENSAL'}
+                {periodoLabel ? ` (${periodoLabel})` : ''}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -535,7 +502,7 @@ export function Relatorios() {
                     </div>
                     <p className="text-2xl font-bold">{formatarMoeda(dados.ebitda)}</p>
                     <p className="text-xs text-purple-600 mt-1">
-                      {formatarPorcentagem((dados.ebitda / dados.receitaLiquida) * 100)} margem
+                      {formatarPorcentagem(dados.receitaLiquida > 0 ? (dados.ebitda / dados.receitaLiquida) * 100 : 0)} margem
                     </p>
                   </CardContent>
                 </Card>
@@ -654,7 +621,7 @@ export function Relatorios() {
                     <TableRow className="font-semibold bg-primary/5">
                       <TableCell>RECEITA BRUTA</TableCell>
                       <TableCell className="text-right">{formatarMoeda(dados.receitaBruta)}</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.receitaBruta / dados.receitaLiquida) * 100)}</TableCell>
+                      <TableCell className="text-right">{formatarPorcentagem(dados.receitaLiquida > 0 ? (dados.receitaBruta / dados.receitaLiquida) * 100 : 0)}</TableCell>
                       <TableCell className="text-right">-</TableCell>
                     </TableRow>
                     
@@ -887,7 +854,10 @@ export function Relatorios() {
                         <div className="flex items-center gap-2">
                           <ChevronRight className="h-4 w-4 text-orange-500" />
                           <p className="text-sm">
-                            <strong>Runway (Pista):</strong> {formatarNumero(dados.saldoFinal / dados.burnRate, 1)} meses de operação
+                            <strong>Runway (Pista):</strong>{' '}
+                            {dados.burnRate > 0
+                              ? `${formatarNumero(dados.saldoFinal / dados.burnRate, 1)} meses de operação`
+                              : 'N/A'}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -911,8 +881,13 @@ export function Relatorios() {
                 <AlertDescription>
                   <strong>Análise de Liquidez:</strong> Com saldo final de {formatarMoeda(dados.saldoFinal)} e burn rate 
                   de {formatarMoeda(dados.burnRate)}, a empresa possui capacidade de operar por aproximadamente{' '}
-                  <strong>{formatarNumero(dados.saldoFinal / dados.burnRate, 1)} meses</strong> sem novas receitas. 
-                  {dados.saldoFinal / dados.burnRate < 3 && ' Atenção: Runway crítico! Considere captação ou redução de custos.'}
+                  <strong>
+                    {dados.burnRate > 0
+                      ? `${formatarNumero(dados.saldoFinal / dados.burnRate, 1)} meses`
+                      : 'N/A'}
+                  </strong>{' '}
+                  sem novas receitas. 
+                  {dados.burnRate > 0 && dados.saldoFinal / dados.burnRate < 3 && ' Atenção: Runway crítico! Considere captação ou redução de custos.'}
                 </AlertDescription>
               </Alert>
             </CardContent>
