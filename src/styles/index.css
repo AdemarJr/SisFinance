@@ -1,3 +1,49 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
+
+/* Impressão de relatórios */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #relatorio-print-area,
+  #relatorio-print-area * {
+    visibility: visible;
+  }
+
+  #relatorio-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 16px;
+    background: white !important;
+    color: black !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .print-break {
+    break-before: page;
+  }
+
+  table {
+    break-inside: auto;
+  }
+
+  tr {
+    break-inside: avoid;
+  }
+}
+
+.print-only {
+  display: none;
+}

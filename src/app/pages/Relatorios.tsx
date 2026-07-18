@@ -1,7 +1,18 @@
 import { useEffect, useState } from 'react';
-import { db } from '../../lib/db';
-import { formatarMoeda, formatarNumero, formatarPorcentagem, formatarInteiro } from '../../lib/formatters';
-import { gerarRelatorioCompleto, calcularIntervaloPeriodo, type AgingData } from '../../lib/relatorios-helpers';
+import {
+  formatarMoeda,
+  formatarNumero,
+  formatarPorcentagem,
+} from '../../lib/formatters';
+import {
+  gerarRelatorioCompleto,
+  calcularIntervaloPeriodo,
+  type AgingData,
+  type RelatorioCompleto,
+  type MovimentoDetalhe,
+  type EmpresaResumo,
+  type GastoFornecedor,
+} from '../../lib/relatorios-helpers';
 import {
   FileText,
   Download,
@@ -25,6 +36,9 @@ import {
   TrendingUpDown,
   AlertTriangle,
   ChevronRight,
+  Printer,
+  Building2,
+  List,
 } from 'lucide-react';
 import {
   BarChart,
@@ -89,7 +103,6 @@ const CHART_COLORS = [
 ];
 
 interface RelatorioData {
-  // DRE
   receitaBruta: number;
   impostos: number;
   receitaLiquida: number;
@@ -104,155 +117,161 @@ interface RelatorioData {
   lair: number;
   impostoRenda: number;
   lucroLiquido: number;
-
-  // Fluxo de Caixa
   saldoInicial: number;
   entradas: number;
   saidas: number;
   saldoFinal: number;
   burnRate: number;
-
-  // KPIs
   margemBruta: number;
   margemLiquida: number;
   roi: number;
   pontoEquilibrio: number;
-
-  // Prazos Médios
-  pmp: number; // Prazo Médio de Pagamento
-  pmr: number; // Prazo Médio de Recebimento
-  pme: number; // Prazo Médio de Estoque
-
-  // Inadimplência
+  pmp: number;
+  pmr: number;
+  pme: number;
   totalReceber: number;
   totalVencido: number;
   percentualInadimplencia: number;
   provisaoDevedoresDuvidosos: number;
-
-  // Comparativos
   orcadoReceita: number;
   orcadoDespesas: number;
   desvioReceita: number;
   desvioDespesas: number;
 }
 
+function TabelaMovimentos({
+  titulo,
+  itens,
+  tipo,
+}: {
+  titulo: string;
+  itens: MovimentoDetalhe[];
+  tipo: 'Receita' | 'Despesa';
+}) {
+  const total = itens.reduce((s, i) => s + i.valor, 0);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            <List className="h-5 w-5 text-primary" />
+            {titulo}
+          </span>
+          <Badge variant="outline">
+            {itens.length} itens · {formatarMoeda(total)}
+          </Badge>
+        </CardTitle>
+        <CardDescription>
+          Detalhamento de {tipo === 'Receita' ? 'receitas' : 'despesas'} do período
+          (lançamentos e contas)
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Data</TableHead>
+                <TableHead>Empresa</TableHead>
+                <TableHead>Origem</TableHead>
+                <TableHead>Descrição</TableHead>
+                <TableHead>Categoria</TableHead>
+                <TableHead>Terceiro</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Valor</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {itens.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                    Nenhum registro no período
+                  </TableCell>
+                </TableRow>
+              ) : (
+                itens.map((item) => (
+                  <TableRow key={`${item.origem}-${item.id}`}>
+                    <TableCell className="whitespace-nowrap">{item.data || '-'}</TableCell>
+                    <TableCell>{item.empresaNome}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{item.origem}</Badge>
+                    </TableCell>
+                    <TableCell className="max-w-[220px] truncate">{item.descricao}</TableCell>
+                    <TableCell>{item.categoria}</TableCell>
+                    <TableCell>{item.terceiro || '-'}</TableCell>
+                    <TableCell>{item.status}</TableCell>
+                    <TableCell
+                      className={`text-right font-semibold ${
+                        tipo === 'Receita' ? 'text-green-500' : 'text-red-400'
+                      }`}
+                    >
+                      {formatarMoeda(item.valor)}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+              {itens.length > 0 && (
+                <TableRow className="font-bold bg-primary/5 border-t-2">
+                  <TableCell colSpan={7}>TOTAL</TableCell>
+                  <TableCell className="text-right">{formatarMoeda(total)}</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function Relatorios() {
-  const { empresaSelecionada, empresaAtual } = useEmpresa();
+  const { empresaSelecionada, empresaAtual, empresas } = useEmpresa();
   const [loading, setLoading] = useState(true);
   const [periodo, setPeriodo] = useState('mes-atual');
   const [dados, setDados] = useState<RelatorioData | null>(null);
   const [agingData, setAgingData] = useState<AgingData[]>([]);
-  const [gastosPorFornecedor, setGastosPorFornecedor] = useState<any[]>([]);
+  const [gastosPorFornecedor, setGastosPorFornecedor] = useState<GastoFornecedor[]>([]);
+  const [receitasDetalhe, setReceitasDetalhe] = useState<MovimentoDetalhe[]>([]);
+  const [despesasDetalhe, setDespesasDetalhe] = useState<MovimentoDetalhe[]>([]);
+  const [porEmpresa, setPorEmpresa] = useState<EmpresaResumo[]>([]);
   const [periodoLabel, setPeriodoLabel] = useState('');
+  const [escopoTodas, setEscopoTodas] = useState(false);
 
   useEffect(() => {
-    if (!empresaSelecionada) {
-      setLoading(false);
-      setDados(null);
-      setAgingData([]);
-      setGastosPorFornecedor([]);
-      return;
-    }
     void carregarDados();
-  }, [empresaSelecionada, periodo]);
-
-  const carregarGastosPorFornecedor = async (dataInicio: string, dataFim: string) => {
-    try {
-      const { data: contasPagar, error: erroContas } = await db
-        .from('contas_pagar')
-        .select('*, fornecedores(nome)')
-        .eq('empresa_id', empresaSelecionada)
-        .gte('data_vencimento', dataInicio)
-        .lte('data_vencimento', dataFim);
-
-      if (erroContas) {
-        console.error('Erro ao carregar contas a pagar:', erroContas);
-      }
-
-      const { data: lancamentos, error: erroLancamentos } = await db
-        .from('lancamentos')
-        .select('*, fornecedores(nome)')
-        .eq('empresa_id', empresaSelecionada)
-        .eq('tipo', 'Despesa')
-        .gte('data', dataInicio)
-        .lte('data', dataFim);
-
-      if (erroLancamentos) {
-        console.error('Erro ao carregar lançamentos:', erroLancamentos);
-      }
-
-      const gastosPorFornecedorMap = new Map<string, { nome: string; total: number; quantidade: number }>();
-
-      const addGasto = (nome: string, valor: number) => {
-        if (!Number.isFinite(valor) || valor <= 0) return;
-        const atual = gastosPorFornecedorMap.get(nome);
-        if (atual) {
-          atual.total += valor;
-          atual.quantidade += 1;
-        } else {
-          gastosPorFornecedorMap.set(nome, { nome, total: valor, quantidade: 1 });
-        }
-      };
-
-      ((contasPagar as any[]) || []).forEach((conta) => {
-        const fornecedorNome = conta.fornecedores?.nome || 'Sem Fornecedor';
-        const valor = Number(conta.valor_total ?? conta.valor_pago ?? conta.valor ?? 0);
-        addGasto(fornecedorNome, valor);
-      });
-
-      ((lancamentos as any[]) || [])
-        .filter((lanc) => lanc.fornecedor_id)
-        .forEach((lanc) => {
-          const fornecedorNome = lanc.fornecedores?.nome || 'Outros';
-          addGasto(fornecedorNome, Number(lanc.valor || 0));
-        });
-
-      const gastosArray = Array.from(gastosPorFornecedorMap.values()).sort(
-        (a, b) => b.total - a.total
-      );
-      const totalGeral = gastosArray.reduce((sum, f) => sum + f.total, 0);
-      setGastosPorFornecedor(
-        gastosArray.map((f) => ({
-          ...f,
-          percentual: totalGeral > 0 ? (f.total / totalGeral) * 100 : 0,
-        }))
-      );
-    } catch (error) {
-      console.error('Erro ao carregar gastos por fornecedor:', error);
-      setGastosPorFornecedor([]);
-    }
-  };
+  }, [empresaSelecionada, periodo, escopoTodas]);
 
   const carregarDados = async () => {
-    if (!empresaSelecionada) return;
-
     setLoading(true);
     try {
       const { dataInicio, dataFim } = calcularIntervaloPeriodo(periodo);
       setPeriodoLabel(`${dataInicio} → ${dataFim}`);
 
+      const usarTodas = escopoTodas || !empresaSelecionada;
+      const filtro = {
+        empresaId: usarTodas ? undefined : empresaSelecionada,
+        dataInicio,
+        dataFim,
+      };
+
       console.log('📊 Gerando relatório:', {
-        empresa: empresaAtual?.nome || empresaSelecionada,
-        empresaId: empresaSelecionada,
+        escopo: usarTodas ? 'TODAS AS EMPRESAS' : empresaAtual?.nome || empresaSelecionada,
         periodo,
         dataInicio,
         dataFim,
       });
 
-      const dadosRelatorio = await gerarRelatorioCompleto({
-        empresaId: empresaSelecionada,
-        dataInicio,
-        dataFim,
-      });
+      const rel: RelatorioCompleto = await gerarRelatorioCompleto(filtro);
 
-      setDados(dadosRelatorio);
-      setAgingData(dadosRelatorio.agingData);
-      await carregarGastosPorFornecedor(dataInicio, dataFim);
-      console.log('✅ Relatório gerado com sucesso!');
+      setDados(rel);
+      setAgingData(rel.agingData);
+      setGastosPorFornecedor(rel.gastosPorFornecedor);
+      setReceitasDetalhe(rel.receitasDetalhe);
+      setDespesasDetalhe(rel.despesasDetalhe);
+      setPorEmpresa(rel.porEmpresa);
     } catch (error) {
       console.error('❌ Erro ao carregar dados do relatório:', error);
       toast.error('Erro ao gerar relatório. Verifique a conexão com a API.');
-
       setDados({
         receitaBruta: 0,
         impostos: 0,
@@ -289,31 +308,15 @@ export function Relatorios() {
         desvioReceita: 0,
         desvioDespesas: 0,
       });
-      setAgingData([
-        { periodo: 'A Vencer', valor: 0, percentual: 0, quantidade: 0 },
-        { periodo: '1-30 dias', valor: 0, percentual: 0, quantidade: 0 },
-        { periodo: '31-60 dias', valor: 0, percentual: 0, quantidade: 0 },
-        { periodo: '61-90 dias', valor: 0, percentual: 0, quantidade: 0 },
-        { periodo: '> 90 dias', valor: 0, percentual: 0, quantidade: 0 },
-      ]);
+      setAgingData([]);
       setGastosPorFornecedor([]);
+      setReceitasDetalhe([]);
+      setDespesasDetalhe([]);
+      setPorEmpresa([]);
     } finally {
       setLoading(false);
     }
   };
-
-  if (!empresaSelecionada) {
-    return (
-      <div className="p-8">
-        <Alert>
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            Selecione uma empresa para visualizar os relatórios financeiros.
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
 
   if (loading || !dados) {
     return (
@@ -328,8 +331,16 @@ export function Relatorios() {
     );
   }
 
-  // Dados para gráficos
   const receitaBase = dados.receitaLiquida || 1;
+  const escopoLabel =
+    escopoTodas || !empresaSelecionada
+      ? `Todas as empresas (${empresas.length})`
+      : empresaAtual?.nome || 'Empresa selecionada';
+
+  const imprimirRelatorio = () => {
+    window.print();
+  };
+
   const dreData = [
     { nome: 'Receita Bruta', valor: dados.receitaBruta },
     { nome: 'Impostos', valor: -dados.impostos },
@@ -371,71 +382,117 @@ export function Relatorios() {
     { indicador: 'PMR', dias: dados.pmr, descricao: 'Prazo Médio de Recebimento' },
     { indicador: 'PME', dias: dados.pme, descricao: 'Prazo Médio de Estoque' },
     { indicador: 'PMP', dias: dados.pmp, descricao: 'Prazo Médio de Pagamento' },
-    { indicador: 'CCF', dias: dados.pmr + dados.pme - dados.pmp, descricao: 'Ciclo de Caixa Financeiro' },
+    {
+      indicador: 'CCF',
+      dias: dados.pmr + dados.pme - dados.pmp,
+      descricao: 'Ciclo de Caixa Financeiro',
+    },
   ];
 
-  const exportarPDF = () => {
-    // Implementar exportação real em produção
-    alert('Funcionalidade de exportação será implementada em breve!');
-  };
-
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Relatórios Financeiros"
-        description="Análise detalhada da saúde financeira da empresa"
-        icon={FileText}
-      />
-
-      {/* Filtros e Ações */}
-      <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant={periodo === 'semana' ? 'default' : 'outline'}
-            onClick={() => setPeriodo('semana')}
-            size="sm"
-          >
-            Semanal
-          </Button>
-          <Button
-            variant={periodo === 'mes-atual' ? 'default' : 'outline'}
-            onClick={() => setPeriodo('mes-atual')}
-            size="sm"
-          >
-            Mensal
-          </Button>
-          <Button
-            variant={periodo === 'trimestre' ? 'default' : 'outline'}
-            onClick={() => setPeriodo('trimestre')}
-            size="sm"
-          >
-            Trimestral
-          </Button>
-          <Button
-            variant={periodo === 'ano' ? 'default' : 'outline'}
-            onClick={() => setPeriodo('ano')}
-            size="sm"
-          >
-            Anual
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {periodoLabel && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Calendar className="h-3.5 w-3.5" />
-              {periodoLabel}
-            </span>
-          )}
-          <Button onClick={exportarPDF} variant="outline" className="gap-2">
-            <Download className="h-4 w-4" />
-            Exportar PDF
-          </Button>
-        </div>
+    <div id="relatorio-print-area" className="space-y-6">
+      <div className="no-print">
+        <PageHeader
+          title="Relatórios Financeiros"
+          description={`Análise detalhada — ${escopoLabel}`}
+          icon={FileText}
+        />
       </div>
 
-      <Tabs defaultValue="sumario" className="space-y-6">
-        <TabsList className="grid grid-cols-3 lg:grid-cols-7 gap-2">
+      <div className="print-only mb-4">
+        <h1 className="text-2xl font-bold">SisFinance — Relatório Financeiro</h1>
+        <p>
+          Escopo: {escopoLabel} | Período: {periodoLabel}
+        </p>
+        <p className="text-sm">Gerado em {new Date().toLocaleString('pt-BR')}</p>
+      </div>
+
+      {/* Filtros e Ações */}
+      <div className="no-print flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={periodo === 'semana' ? 'default' : 'outline'}
+              onClick={() => setPeriodo('semana')}
+              size="sm"
+            >
+              Semanal
+            </Button>
+            <Button
+              variant={periodo === 'mes-atual' ? 'default' : 'outline'}
+              onClick={() => setPeriodo('mes-atual')}
+              size="sm"
+            >
+              Mensal
+            </Button>
+            <Button
+              variant={periodo === 'trimestre' ? 'default' : 'outline'}
+              onClick={() => setPeriodo('trimestre')}
+              size="sm"
+            >
+              Trimestral
+            </Button>
+            <Button
+              variant={periodo === 'ano' ? 'default' : 'outline'}
+              onClick={() => setPeriodo('ano')}
+              size="sm"
+            >
+              Anual
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {periodoLabel && (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Calendar className="h-3.5 w-3.5" />
+                {periodoLabel}
+              </span>
+            )}
+            <Button
+              variant={escopoTodas || !empresaSelecionada ? 'default' : 'outline'}
+              size="sm"
+              className="gap-2"
+              onClick={() => setEscopoTodas(true)}
+            >
+              <Building2 className="h-4 w-4" />
+              Todas empresas
+            </Button>
+            {empresaSelecionada && (
+              <Button
+                variant={!escopoTodas ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setEscopoTodas(false)}
+              >
+                Só selecionada
+              </Button>
+            )}
+            <Button onClick={imprimirRelatorio} variant="outline" className="gap-2">
+              <Printer className="h-4 w-4" />
+              Imprimir
+            </Button>
+            <Button onClick={imprimirRelatorio} variant="outline" className="gap-2">
+              <Download className="h-4 w-4" />
+              PDF
+            </Button>
+          </div>
+        </div>
+
+        {!empresaSelecionada && !escopoTodas && (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Nenhuma empresa selecionada no menu — exibindo <strong>todas as empresas</strong>.
+              Use o seletor do topo para filtrar uma empresa específica.
+            </AlertDescription>
+          </Alert>
+        )}
+      </div>
+
+      <Tabs defaultValue="por-empresa" className="space-y-6">
+        <TabsList className="no-print grid grid-cols-3 lg:grid-cols-9 gap-2 h-auto">
+          <TabsTrigger value="por-empresa">Por Empresa</TabsTrigger>
+          <TabsTrigger value="receitas">Receitas</TabsTrigger>
+          <TabsTrigger value="despesas">Despesas</TabsTrigger>
           <TabsTrigger value="sumario">Sumário</TabsTrigger>
           <TabsTrigger value="dre">DRE</TabsTrigger>
           <TabsTrigger value="fluxo-caixa">Fluxo de Caixa</TabsTrigger>
@@ -444,6 +501,143 @@ export function Relatorios() {
           <TabsTrigger value="inadimplencia">Inadimplência</TabsTrigger>
           <TabsTrigger value="conclusao">Conclusão</TabsTrigger>
         </TabsList>
+
+        {/* ===== POR EMPRESA ===== */}
+        <TabsContent value="por-empresa" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5 text-primary" />
+                Relatório por Empresa
+              </CardTitle>
+              <CardDescription>
+                Receitas e despesas de cada empresa cadastrada no período {periodoLabel}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card className="bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/20">
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground mb-1">Total Receitas</p>
+                    <p className="text-2xl font-bold text-green-500">
+                      {formatarMoeda(receitasDetalhe.reduce((s, r) => s + r.valor, 0))}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/20">
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground mb-1">Total Despesas</p>
+                    <p className="text-2xl font-bold text-red-400">
+                      {formatarMoeda(despesasDetalhe.reduce((s, d) => s + d.valor, 0))}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
+                  <CardContent className="pt-6">
+                    <p className="text-sm text-muted-foreground mb-1">Resultado</p>
+                    <p className="text-2xl font-bold">
+                      {formatarMoeda(
+                        receitasDetalhe.reduce((s, r) => s + r.valor, 0) -
+                          despesasDetalhe.reduce((s, d) => s + d.valor, 0)
+                      )}
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Empresa</TableHead>
+                      <TableHead className="text-right">Receitas</TableHead>
+                      <TableHead className="text-right">% Rec.</TableHead>
+                      <TableHead className="text-right">Despesas</TableHead>
+                      <TableHead className="text-right">% Desp.</TableHead>
+                      <TableHead className="text-right">Resultado</TableHead>
+                      <TableHead className="text-right">Qtd Rec.</TableHead>
+                      <TableHead className="text-right">Qtd Desp.</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {porEmpresa.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                          Nenhuma empresa com movimentos no período
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      porEmpresa.map((emp) => (
+                        <TableRow key={emp.empresaId}>
+                          <TableCell className="font-medium">{emp.empresaNome}</TableCell>
+                          <TableCell className="text-right text-green-500">
+                            {formatarMoeda(emp.receitas)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatarPorcentagem(emp.percentualReceitas)}
+                          </TableCell>
+                          <TableCell className="text-right text-red-400">
+                            {formatarMoeda(emp.despesas)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {formatarPorcentagem(emp.percentualDespesas)}
+                          </TableCell>
+                          <TableCell
+                            className={`text-right font-semibold ${
+                              emp.resultado >= 0 ? 'text-green-500' : 'text-red-400'
+                            }`}
+                          >
+                            {formatarMoeda(emp.resultado)}
+                          </TableCell>
+                          <TableCell className="text-right">{emp.qtdReceitas}</TableCell>
+                          <TableCell className="text-right">{emp.qtdDespesas}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {porEmpresa.length > 0 && (
+                <div>
+                  <h3 className="text-lg font-semibold mb-4">Despesas por Empresa</h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={porEmpresa}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis dataKey="empresaNome" stroke="#9ca3af" />
+                      <YAxis stroke="#9ca3af" tickFormatter={(v) => formatarMoeda(v)} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }}
+                        formatter={(value: number) => formatarMoeda(value)}
+                      />
+                      <Legend />
+                      <Bar dataKey="receitas" fill={COLORS.success} name="Receitas" />
+                      <Bar dataKey="despesas" fill={COLORS.danger} name="Despesas" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ===== RECEITAS DETALHADAS ===== */}
+        <TabsContent value="receitas" className="space-y-6 print-break">
+          <TabelaMovimentos
+            titulo="Receitas Detalhadas"
+            itens={receitasDetalhe}
+            tipo="Receita"
+          />
+        </TabsContent>
+
+        {/* ===== DESPESAS DETALHADAS ===== */}
+        <TabsContent value="despesas" className="space-y-6 print-break">
+          <TabelaMovimentos
+            titulo="Despesas Detalhadas"
+            itens={despesasDetalhe}
+            tipo="Despesa"
+          />
+        </TabsContent>
 
         {/* ===== SUMÁRIO EXECUTIVO ===== */}
         <TabsContent value="sumario" className="space-y-6">
