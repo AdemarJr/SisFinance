@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   FileText,
   Printer,
@@ -7,6 +7,7 @@ import {
   Loader2,
   AlertCircle,
   Download,
+  Filter,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useEmpresa } from '../contexts/EmpresaContext';
@@ -36,8 +37,33 @@ import {
   gerarRelatorioCompleto,
   calcularIntervaloPeriodo,
   formatarDataBR,
+  listarFornecedoresRelatorio,
   type RelatorioCompleto,
 } from '../../lib/relatorios-helpers';
+
+const ALL = 'todos';
+
+const STATUS_OPCOES = [
+  ALL,
+  'Previsto',
+  'Realizado',
+  'Recebido',
+  'Pago',
+  'Atrasado',
+  'Parcial',
+  'Em Aberto',
+];
+
+const FORMAS_OPCOES = [
+  ALL,
+  'Dinheiro',
+  'PIX',
+  'Cartão de Crédito',
+  'Cartão de Débito',
+  'Boleto',
+  'Transferência',
+  'Cheque',
+];
 
 type TipoRelatorio =
   | 'dre'
@@ -120,6 +146,12 @@ export function Relatorios() {
   const [escopo, setEscopo] = useState<'selecionada' | 'todas'>(
     empresaSelecionada ? 'selecionada' : 'todas'
   );
+  const [filtroTipoMov, setFiltroTipoMov] = useState<string>(ALL);
+  const [filtroStatus, setFiltroStatus] = useState<string>(ALL);
+  const [filtroFornecedor, setFiltroFornecedor] = useState<string>(ALL);
+  const [filtroForma, setFiltroForma] = useState<string>(ALL);
+  const [filtroBusca, setFiltroBusca] = useState('');
+  const [fornecedores, setFornecedores] = useState<{ id: string; nome: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [relatorio, setRelatorio] = useState<RelatorioCompleto | null>(null);
   const [geradoEm, setGeradoEm] = useState<Date | null>(null);
@@ -132,7 +164,21 @@ export function Relatorios() {
     empresaCnpj: string;
   } | null>(null);
 
+  useEffect(() => {
+    void listarFornecedoresRelatorio()
+      .then(setFornecedores)
+      .catch(() => setFornecedores([]));
+  }, []);
+
   const tipoInfo = TIPOS.find((t) => t.id === tipo)!;
+
+  const limparFiltros = () => {
+    setFiltroTipoMov(ALL);
+    setFiltroStatus(ALL);
+    setFiltroFornecedor(ALL);
+    setFiltroForma(ALL);
+    setFiltroBusca('');
+  };
 
   const gerar = async () => {
     if (!dataInicio || !dataFim) {
@@ -156,6 +202,11 @@ export function Relatorios() {
         empresaId: usarTodas ? undefined : empresaSelecionada,
         dataInicio,
         dataFim,
+        tipo: filtroTipoMov as 'todos' | 'Receita' | 'Despesa' | 'Transferência',
+        status: filtroStatus,
+        fornecedorId: filtroFornecedor,
+        formaPagamento: filtroForma,
+        busca: filtroBusca,
       });
       setRelatorio(dados);
       setGeradoEm(new Date());
@@ -361,6 +412,94 @@ export function Relatorios() {
             </div>
           </div>
 
+          <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold flex items-center gap-2">
+                <Filter className="h-4 w-4" />
+                Filtros do demonstrativo
+              </p>
+              <Button type="button" variant="ghost" size="sm" onClick={limparFiltros}>
+                Limpar filtros
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Tipo (Receita / Despesa)</Label>
+                <Select value={filtroTipoMov} onValueChange={setFiltroTipoMov}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>Todos</SelectItem>
+                    <SelectItem value="Receita">Receita</SelectItem>
+                    <SelectItem value="Despesa">Despesa</SelectItem>
+                    <SelectItem value="Transferência">Transferência</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={filtroStatus} onValueChange={setFiltroStatus}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPCOES.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s === ALL ? 'Todos' : s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Fornecedor</Label>
+                <Select value={filtroFornecedor} onValueChange={setFiltroFornecedor}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>Todos</SelectItem>
+                    {fornecedores.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>
+                        {f.nome}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Forma de pagamento</Label>
+                <Select value={filtroForma} onValueChange={setFiltroForma}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FORMAS_OPCOES.map((f) => (
+                      <SelectItem key={f} value={f}>
+                        {f === ALL ? 'Todas' : f}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="filtro-busca">Busca na descrição</Label>
+                <Input
+                  id="filtro-busca"
+                  placeholder="Ex.: aluguel, energia, fornecedor..."
+                  value={filtroBusca}
+                  onChange={(e) => setFiltroBusca(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-wrap gap-2 pt-2 border-t">
             <Button onClick={() => void gerar()} disabled={loading} className="gap-2">
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
@@ -436,6 +575,31 @@ export function Relatorios() {
               {meta.tipo === 'fluxo' && (
                 <Badge variant="outline" className="border-slate-300 text-slate-700">
                   Regime: Caixa
+                </Badge>
+              )}
+              {relatorio.filtrosAplicados?.tipo && (
+                <Badge variant="outline" className="border-blue-300 text-blue-800">
+                  Tipo: {relatorio.filtrosAplicados.tipo}
+                </Badge>
+              )}
+              {relatorio.filtrosAplicados?.status && (
+                <Badge variant="outline" className="border-blue-300 text-blue-800">
+                  Status: {relatorio.filtrosAplicados.status}
+                </Badge>
+              )}
+              {relatorio.filtrosAplicados?.fornecedor && (
+                <Badge variant="outline" className="border-blue-300 text-blue-800">
+                  Fornecedor: {relatorio.filtrosAplicados.fornecedor}
+                </Badge>
+              )}
+              {relatorio.filtrosAplicados?.formaPagamento && (
+                <Badge variant="outline" className="border-blue-300 text-blue-800">
+                  Forma: {relatorio.filtrosAplicados.formaPagamento}
+                </Badge>
+              )}
+              {relatorio.filtrosAplicados?.busca && (
+                <Badge variant="outline" className="border-blue-300 text-blue-800">
+                  Busca: {relatorio.filtrosAplicados.busca}
                 </Badge>
               )}
             </div>

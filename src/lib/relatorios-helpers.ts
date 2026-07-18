@@ -5,6 +5,20 @@ export interface PeriodoFiltro {
   empresaId?: string;
   dataInicio: string;
   dataFim: string;
+  /** Filtros opcionais do demonstrativo */
+  tipo?: 'todos' | 'Receita' | 'Despesa' | 'Transferência';
+  status?: string; // 'todos' ou valor exato
+  fornecedorId?: string; // 'todos' ou id
+  formaPagamento?: string; // 'todos' ou valor
+  busca?: string; // texto em descrição
+}
+
+export interface FiltrosAplicados {
+  tipo?: string;
+  status?: string;
+  fornecedor?: string;
+  formaPagamento?: string;
+  busca?: string;
 }
 
 export interface RelatorioData {
@@ -64,6 +78,7 @@ export interface MovimentoDetalhe {
   valor: number;
   formaPagamento?: string;
   terceiro?: string;
+  fornecedorId?: string;
 }
 
 export interface EmpresaResumo {
@@ -103,6 +118,7 @@ export interface RelatorioCompleto extends RelatorioData {
   irEstimado: boolean;
   orcadoEstimado: boolean;
   notas: string[];
+  filtrosAplicados: FiltrosAplicados;
 }
 
 export function toLocalDateString(date: Date): string {
@@ -505,6 +521,115 @@ function normalizarTipo(tipo: unknown): 'Receita' | 'Despesa' | 'Transferência'
   return 'Despesa';
 }
 
+function aplicarFiltrosLancamentos(lancamentos: any[], filtro: PeriodoFiltro): any[] {
+  const tipo = filtro.tipo && filtro.tipo !== 'todos' ? filtro.tipo : null;
+  const status =
+    filtro.status && filtro.status !== 'todos'
+      ? filtro.status.toLowerCase()
+      : null;
+  const fornecedorId =
+    filtro.fornecedorId && filtro.fornecedorId !== 'todos'
+      ? filtro.fornecedorId
+      : null;
+  const forma =
+    filtro.formaPagamento && filtro.formaPagamento !== 'todos'
+      ? filtro.formaPagamento.toLowerCase()
+      : null;
+  const busca = (filtro.busca || '').trim().toLowerCase();
+
+  return lancamentos.filter((l) => {
+    if (tipo && normalizarTipo(l.tipo) !== tipo) return false;
+    if (status && String(l.status || '').toLowerCase() !== status) return false;
+    if (fornecedorId && String(l.fornecedor_id || '') !== fornecedorId) return false;
+    if (forma && String(l.forma_pagamento || '').toLowerCase() !== forma) return false;
+    if (busca) {
+      const texto = `${l.descricao || ''} ${l.categoria || ''} ${l.forma_pagamento || ''}`.toLowerCase();
+      if (!texto.includes(busca)) return false;
+    }
+    return true;
+  });
+}
+
+function aplicarFiltrosContasPagar(contas: any[], filtro: PeriodoFiltro): any[] {
+  const fornecedorId =
+    filtro.fornecedorId && filtro.fornecedorId !== 'todos'
+      ? filtro.fornecedorId
+      : null;
+  const status =
+    filtro.status && filtro.status !== 'todos'
+      ? filtro.status.toLowerCase()
+      : null;
+  const busca = (filtro.busca || '').trim().toLowerCase();
+  const tipo = filtro.tipo && filtro.tipo !== 'todos' ? filtro.tipo : null;
+
+  // Contas a pagar são despesas — se filtro for só Receita, zera
+  if (tipo === 'Receita' || tipo === 'Transferência') return [];
+
+  return contas.filter((c) => {
+    if (fornecedorId && String(c.fornecedor_id || '') !== fornecedorId) return false;
+    if (status && String(c.status || '').toLowerCase() !== status) return false;
+    if (busca) {
+      const texto = `${c.descricao || ''} ${c.categoria || ''}`.toLowerCase();
+      if (!texto.includes(busca)) return false;
+    }
+    return true;
+  });
+}
+
+function aplicarFiltrosContasReceber(contas: any[], filtro: PeriodoFiltro): any[] {
+  const tipo = filtro.tipo && filtro.tipo !== 'todos' ? filtro.tipo : null;
+  const status =
+    filtro.status && filtro.status !== 'todos'
+      ? filtro.status.toLowerCase()
+      : null;
+  const busca = (filtro.busca || '').trim().toLowerCase();
+  const fornecedorId =
+    filtro.fornecedorId && filtro.fornecedorId !== 'todos'
+      ? filtro.fornecedorId
+      : null;
+
+  // Contas a receber não têm fornecedor — se filtro de fornecedor ativo, zera
+  if (fornecedorId) return [];
+  if (tipo === 'Despesa' || tipo === 'Transferência') return [];
+
+  return contas.filter((c) => {
+    if (status && String(c.status || '').toLowerCase() !== status) return false;
+    if (busca) {
+      const texto = `${c.descricao || ''} ${c.categoria || ''}`.toLowerCase();
+      if (!texto.includes(busca)) return false;
+    }
+    return true;
+  });
+}
+
+function montarFiltrosAplicados(
+  filtro: PeriodoFiltro,
+  fornecedoresMap: Map<string, string>
+): FiltrosAplicados {
+  const out: FiltrosAplicados = {};
+  if (filtro.tipo && filtro.tipo !== 'todos') out.tipo = filtro.tipo;
+  if (filtro.status && filtro.status !== 'todos') out.status = filtro.status;
+  if (filtro.fornecedorId && filtro.fornecedorId !== 'todos') {
+    out.fornecedor =
+      fornecedoresMap.get(filtro.fornecedorId) || filtro.fornecedorId;
+  }
+  if (filtro.formaPagamento && filtro.formaPagamento !== 'todos') {
+    out.formaPagamento = filtro.formaPagamento;
+  }
+  if (filtro.busca?.trim()) out.busca = filtro.busca.trim();
+  return out;
+}
+
+/** Lista fornecedores para o select de filtros do relatório */
+export async function listarFornecedoresRelatorio(): Promise<
+  { id: string; nome: string }[]
+> {
+  const rows = await queryRows('fornecedores', { select: 'id, nome' });
+  return rows
+    .map((f) => ({ id: String(f.id), nome: String(f.nome || 'Fornecedor') }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
 function montarLancamentosDetalhe(
   lancamentos: any[],
   empresasMap: Map<string, string>,
@@ -523,6 +648,7 @@ function montarLancamentosDetalhe(
       status: l.status || '-',
       valor: num(l.valor),
       formaPagamento: l.forma_pagamento || undefined,
+      fornecedorId: l.fornecedor_id ? String(l.fornecedor_id) : undefined,
       terceiro:
         l.fornecedores?.nome ||
         fornecedoresMap.get(l.fornecedor_id) ||
@@ -564,6 +690,7 @@ function montarDetalhesContas(
     categoria: c.categoria || 'Contas a Pagar',
     status: c.status || '-',
     valor: valorConta(c, String(c.status).toLowerCase() === 'pago'),
+    fornecedorId: c.fornecedor_id ? String(c.fornecedor_id) : undefined,
     terceiro: c.fornecedores?.nome || fornecedoresMap.get(c.fornecedor_id),
   }));
 
@@ -773,10 +900,9 @@ export async function gerarRelatorioCompleto(
       order: { column: 'data', ascending: false },
     });
     console.log(`📋 Total de lançamentos no banco (escopo): ${todos.length}`);
-    // Mantém vazio no período, mas se "tudo" não foi pedido, não mistura datas fora
   }
 
-  const [contasRecebidas, contasPagas, contasReceberTodas, contasPagarTodas] =
+  let [contasRecebidas, contasPagas, contasReceberTodas, contasPagarTodas] =
     await Promise.all([
       queryRows('contas_receber', {
         select: '*',
@@ -806,10 +932,20 @@ export async function gerarRelatorioCompleto(
       }),
     ]);
 
-  console.log('📊 Contagens:', {
+  // Aplica filtros do demonstrativo (tipo, status, fornecedor, etc.)
+  lancamentos = aplicarFiltrosLancamentos(lancamentos, filtro);
+  contasRecebidas = aplicarFiltrosContasReceber(contasRecebidas, filtro);
+  contasPagas = aplicarFiltrosContasPagar(contasPagas, filtro);
+  contasReceberTodas = aplicarFiltrosContasReceber(contasReceberTodas, filtro);
+  contasPagarTodas = aplicarFiltrosContasPagar(contasPagarTodas, filtro);
+
+  const filtrosAplicados = montarFiltrosAplicados(filtro, fornecedoresMap);
+
+  console.log('📊 Contagens (após filtros):', {
     lancamentos: lancamentos.length,
     contasRecebidas: contasRecebidas.length,
     contasPagas: contasPagas.length,
+    filtros: filtrosAplicados,
   });
 
   const { receitaBruta, impostos, receitaLiquida, impostosEstimados } = calcularReceitas(
@@ -920,6 +1056,13 @@ export async function gerarRelatorioCompleto(
     notas.push('PME (prazo médio de estoque) usa valor de referência (22 dias) — não calculado do estoque.');
   }
 
+  if (Object.keys(filtrosAplicados).length > 0) {
+    const partes = Object.entries(filtrosAplicados)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('; ');
+    notas.push(`Filtros aplicados no demonstrativo — ${partes}.`);
+  }
+
   return {
     receitaBruta,
     impostos,
@@ -962,5 +1105,6 @@ export async function gerarRelatorioCompleto(
     irEstimado,
     orcadoEstimado,
     notas,
+    filtrosAplicados,
   };
 }
