@@ -98,6 +98,11 @@ export interface RelatorioCompleto extends RelatorioData {
   totalDespesas: number;
   totalReceitas: number;
   qtdLancamentos: number;
+  /** Flags de transparência contábil */
+  impostosEstimados: boolean;
+  irEstimado: boolean;
+  orcadoEstimado: boolean;
+  notas: string[];
 }
 
 export function toLocalDateString(date: Date): string {
@@ -240,14 +245,16 @@ function calcularReceitas(lancamentos: any[], contasRecebidas: any[]) {
     );
   });
 
-  const impostos =
-    impostosLanc.length > 0
-      ? impostosLanc.reduce((sum, l) => sum + num(l.valor), 0)
-      : receitaBruta > 0
-        ? receitaBruta * 0.15
-        : 0;
+  const impostosReais = impostosLanc.reduce((sum, l) => sum + num(l.valor), 0);
+  const impostosEstimados = impostosLanc.length === 0 && receitaBruta > 0;
+  const impostos = impostosEstimados ? receitaBruta * 0.15 : impostosReais;
 
-  return { receitaBruta, impostos, receitaLiquida: receitaBruta - impostos };
+  return {
+    receitaBruta,
+    impostos,
+    receitaLiquida: receitaBruta - impostos,
+    impostosEstimados,
+  };
 }
 
 function calcularDespesas(lancamentos: any[], contasPagas: any[]) {
@@ -672,6 +679,27 @@ function montarGastosFornecedor(despesas: MovimentoDetalhe[]): GastoFornecedor[]
   }));
 }
 
+export function formatarDataBR(iso: string): string {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+export function periodoAnterior(dataInicio: string, dataFim: string): PeriodoFiltro {
+  const ini = new Date(`${dataInicio}T12:00:00`);
+  const fim = new Date(`${dataFim}T12:00:00`);
+  const dias = Math.max(1, Math.floor((fim.getTime() - ini.getTime()) / 86400000) + 1);
+  const fimAnt = new Date(ini);
+  fimAnt.setDate(fimAnt.getDate() - 1);
+  const iniAnt = new Date(fimAnt);
+  iniAnt.setDate(iniAnt.getDate() - (dias - 1));
+  return {
+    dataInicio: toLocalDateString(iniAnt),
+    dataFim: toLocalDateString(fimAnt),
+  };
+}
+
 export function calcularIntervaloPeriodo(
   periodo: string,
   referencia: Date = new Date()
@@ -784,7 +812,7 @@ export async function gerarRelatorioCompleto(
     contasPagas: contasPagas.length,
   });
 
-  const { receitaBruta, impostos, receitaLiquida } = calcularReceitas(
+  const { receitaBruta, impostos, receitaLiquida, impostosEstimados } = calcularReceitas(
     lancamentos,
     contasRecebidas
   );
@@ -808,6 +836,7 @@ export async function gerarRelatorioCompleto(
     )
     .reduce((s, l) => s + num(l.valor), 0);
   const lair = ebit + receitasFinanceiras - despesasFinanceiras;
+  const irEstimado = lair > 0;
   const impostoRenda = Math.max(0, lair * 0.3);
   const lucroLiquido = lair - impostoRenda;
 
@@ -868,8 +897,28 @@ export async function gerarRelatorioCompleto(
   const totalReceitas = receitasDetalhe.reduce((s, r) => s + r.valor, 0);
   const totalDespesas = despesasDetalhe.reduce((s, d) => s + d.valor, 0);
 
-  const orcadoReceita = receitaBruta > 0 ? receitaBruta * 0.95 : 0;
-  const orcadoDespesas = fluxoCaixa.saidas > 0 ? fluxoCaixa.saidas * 1.08 : 0;
+  // Sem orçamento cadastrado no sistema — não inventar valores
+  const orcadoReceita = 0;
+  const orcadoDespesas = 0;
+  const orcadoEstimado = false;
+
+  const notas: string[] = [
+    'Regime de competência aplicado aos lançamentos pela data do lançamento.',
+    'Fluxo de caixa considera lançamentos com status Realizado/Recebido/Pago; na ausência, usa contas liquidadas.',
+  ];
+  if (impostosEstimados) {
+    notas.push(
+      'Impostos sobre vendas estimados em 15% da receita bruta (não há lançamentos classificados como imposto no período).'
+    );
+  }
+  if (irEstimado) {
+    notas.push(
+      'IR/CSLL estimado em 30% do LAIR apenas para fins gerenciais — não substitui apuração fiscal.'
+    );
+  }
+  if (prazosMedios.pme === 22) {
+    notas.push('PME (prazo médio de estoque) usa valor de referência (22 dias) — não calculado do estoque.');
+  }
 
   return {
     receitaBruta,
@@ -899,12 +948,8 @@ export async function gerarRelatorioCompleto(
     agingData: inadimplencia.aging,
     orcadoReceita,
     orcadoDespesas,
-    desvioReceita:
-      orcadoReceita > 0 ? ((receitaBruta - orcadoReceita) / orcadoReceita) * 100 : 0,
-    desvioDespesas:
-      orcadoDespesas > 0
-        ? ((fluxoCaixa.saidas - orcadoDespesas) / orcadoDespesas) * 100
-        : 0,
+    desvioReceita: 0,
+    desvioDespesas: 0,
     lancamentosDetalhe,
     receitasDetalhe,
     despesasDetalhe,
@@ -913,5 +958,9 @@ export async function gerarRelatorioCompleto(
     totalReceitas,
     totalDespesas,
     qtdLancamentos: lancamentosDetalhe.length,
+    impostosEstimados,
+    irEstimado,
+    orcadoEstimado,
+    notas,
   };
 }

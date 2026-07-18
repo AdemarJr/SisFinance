@@ -1,78 +1,28 @@
-import { useEffect, useState } from 'react';
-import {
-  formatarMoeda,
-  formatarNumero,
-  formatarPorcentagem,
-} from '../../lib/formatters';
-import {
-  gerarRelatorioCompleto,
-  calcularIntervaloPeriodo,
-  type AgingData,
-  type RelatorioCompleto,
-  type MovimentoDetalhe,
-  type EmpresaResumo,
-  type GastoFornecedor,
-} from '../../lib/relatorios-helpers';
+import { useMemo, useState } from 'react';
 import {
   FileText,
-  Download,
-  Calendar,
-  TrendingUp,
-  TrendingDown,
-  AlertCircle,
-  DollarSign,
-  Activity,
-  Target,
-  Zap,
-  ArrowUpRight,
-  ArrowDownRight,
-  BarChart3,
-  CheckCircle,
-  XCircle,
-  Info,
-  Clock,
-  CreditCard,
-  Wallet,
-  TrendingUpDown,
-  AlertTriangle,
-  ChevronRight,
   Printer,
   Building2,
-  List,
-  Receipt,
+  Calendar,
+  Loader2,
+  AlertCircle,
+  Download,
 } from 'lucide-react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
-  ComposedChart,
-} from 'recharts';
-import { useEmpresa } from '../contexts/EmpresaContext';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '../components/ui/card';
-import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { PageHeader } from '../components/PageHeader';
-import { Alert, AlertDescription } from '../components/ui/alert';
 import { toast } from 'sonner';
+import { useEmpresa } from '../contexts/EmpresaContext';
+import { PageHeader } from '../components/PageHeader';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Badge } from '../components/ui/badge';
+import { Alert, AlertDescription } from '../components/ui/alert';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
 import {
   Table,
   TableBody,
@@ -81,676 +31,630 @@ import {
   TableHeader,
   TableRow,
 } from '../components/ui/table';
+import { formatarMoeda, formatarPorcentagem } from '../../lib/formatters';
+import {
+  gerarRelatorioCompleto,
+  calcularIntervaloPeriodo,
+  formatarDataBR,
+  type RelatorioCompleto,
+} from '../../lib/relatorios-helpers';
 
-// Cores para gráficos
-const COLORS = {
-  primary: '#10b981',
-  success: '#22c55e',
-  warning: '#f59e0b',
-  danger: '#ef4444',
-  info: '#3b82f6',
-  purple: '#a855f7',
-  indigo: '#6366f1',
-  teal: '#14b8a6',
-};
+type TipoRelatorio =
+  | 'dre'
+  | 'fluxo'
+  | 'lancamentos'
+  | 'por-empresa'
+  | 'aging';
 
-const CHART_COLORS = [
-  COLORS.primary,
-  COLORS.info,
-  COLORS.warning,
-  COLORS.purple,
-  COLORS.teal,
-  COLORS.danger,
+const TIPOS: { id: TipoRelatorio; titulo: string; descricao: string }[] = [
+  {
+    id: 'dre',
+    titulo: 'DRE',
+    descricao: 'Demonstrativo de Resultado do Exercício',
+  },
+  {
+    id: 'fluxo',
+    titulo: 'Fluxo de Caixa',
+    descricao: 'Entradas, saídas e saldo (regime de caixa)',
+  },
+  {
+    id: 'lancamentos',
+    titulo: 'Extrato de Lançamentos',
+    descricao: 'Listagem detalhada de todos os lançamentos',
+  },
+  {
+    id: 'por-empresa',
+    titulo: 'Por Empresa',
+    descricao: 'Receitas e despesas por empresa cadastrada',
+  },
+  {
+    id: 'aging',
+    titulo: 'Contas a Receber (Aging)',
+    descricao: 'Envelhecimento de títulos em aberto',
+  },
 ];
 
-interface RelatorioData {
-  receitaBruta: number;
-  impostos: number;
-  receitaLiquida: number;
-  custosVariaveis: number;
-  margemContribuicao: number;
-  despesasFixas: number;
-  ebitda: number;
-  depreciacaoAmortizacao: number;
-  ebit: number;
-  despesasFinanceiras: number;
-  receitasFinanceiras: number;
-  lair: number;
-  impostoRenda: number;
-  lucroLiquido: number;
-  saldoInicial: number;
-  entradas: number;
-  saidas: number;
-  saldoFinal: number;
-  burnRate: number;
-  margemBruta: number;
-  margemLiquida: number;
-  roi: number;
-  pontoEquilibrio: number;
-  pmp: number;
-  pmr: number;
-  pme: number;
-  totalReceber: number;
-  totalVencido: number;
-  percentualInadimplencia: number;
-  provisaoDevedoresDuvidosos: number;
-  orcadoReceita: number;
-  orcadoDespesas: number;
-  desvioReceita: number;
-  desvioDespesas: number;
+function pctAv(valor: number, base: number): number {
+  if (!base) return 0;
+  return (valor / base) * 100;
 }
 
-function TabelaMovimentos({
-  titulo,
-  itens,
-  tipo,
-}: {
-  titulo: string;
-  itens: MovimentoDetalhe[];
-  tipo: 'Receita' | 'Despesa';
-}) {
-  const total = itens.reduce((s, i) => s + i.valor, 0);
+function linhaDre(
+  label: string,
+  valor: number,
+  base: number,
+  opts?: { bold?: boolean; indent?: boolean; negativo?: boolean; nota?: string }
+) {
+  const exibir = opts?.negativo ? -Math.abs(valor) : valor;
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-2">
-            <List className="h-5 w-5 text-primary" />
-            {titulo}
+    <TableRow key={label} className={opts?.bold ? 'font-semibold bg-muted/40' : ''}>
+      <TableCell className={opts?.indent ? 'pl-8' : ''}>
+        {label}
+        {opts?.nota && (
+          <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-700">
+            ({opts.nota})
           </span>
-          <Badge variant="outline">
-            {itens.length} itens · {formatarMoeda(total)}
-          </Badge>
-        </CardTitle>
-        <CardDescription>
-          Detalhamento de {tipo === 'Receita' ? 'receitas' : 'despesas'} do período
-          (lançamentos e contas)
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Data</TableHead>
-                <TableHead>Empresa</TableHead>
-                <TableHead>Origem</TableHead>
-                <TableHead>Descrição</TableHead>
-                <TableHead>Categoria</TableHead>
-                <TableHead>Terceiro</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Valor</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {itens.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
-                    Nenhum registro no período
-                  </TableCell>
-                </TableRow>
-              ) : (
-                itens.map((item) => (
-                  <TableRow key={`${item.origem}-${item.id}`}>
-                    <TableCell className="whitespace-nowrap">{item.data || '-'}</TableCell>
-                    <TableCell>{item.empresaNome}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{item.origem}</Badge>
-                    </TableCell>
-                    <TableCell className="max-w-[220px] truncate">{item.descricao}</TableCell>
-                    <TableCell>{item.categoria}</TableCell>
-                    <TableCell>{item.terceiro || '-'}</TableCell>
-                    <TableCell>{item.status}</TableCell>
-                    <TableCell
-                      className={`text-right font-semibold ${
-                        tipo === 'Receita' ? 'text-green-500' : 'text-red-400'
-                      }`}
-                    >
-                      {formatarMoeda(item.valor)}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-              {itens.length > 0 && (
-                <TableRow className="font-bold bg-primary/5 border-t-2">
-                  <TableCell colSpan={7}>TOTAL</TableCell>
-                  <TableCell className="text-right">{formatarMoeda(total)}</TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
+        )}
+      </TableCell>
+      <TableCell
+        className={`text-right tabular-nums ${
+          exibir < 0 ? 'text-red-700' : opts?.bold ? 'text-foreground' : ''
+        }`}
+      >
+        {formatarMoeda(exibir)}
+      </TableCell>
+      <TableCell className="text-right tabular-nums text-muted-foreground">
+        {formatarPorcentagem(pctAv(Math.abs(valor), base || 1))}
+      </TableCell>
+    </TableRow>
   );
 }
 
 export function Relatorios() {
   const { empresaSelecionada, empresaAtual, empresas } = useEmpresa();
-  const [loading, setLoading] = useState(true);
-  const [periodo, setPeriodo] = useState('tudo');
-  const [dados, setDados] = useState<RelatorioData | null>(null);
-  const [agingData, setAgingData] = useState<AgingData[]>([]);
-  const [gastosPorFornecedor, setGastosPorFornecedor] = useState<GastoFornecedor[]>([]);
-  const [lancamentosDetalhe, setLancamentosDetalhe] = useState<MovimentoDetalhe[]>([]);
-  const [receitasDetalhe, setReceitasDetalhe] = useState<MovimentoDetalhe[]>([]);
-  const [despesasDetalhe, setDespesasDetalhe] = useState<MovimentoDetalhe[]>([]);
-  const [porEmpresa, setPorEmpresa] = useState<EmpresaResumo[]>([]);
-  const [periodoLabel, setPeriodoLabel] = useState('');
-  const [escopoTodas, setEscopoTodas] = useState(false);
-  const [qtdLancamentos, setQtdLancamentos] = useState(0);
+  const mesPadrao = useMemo(() => calcularIntervaloPeriodo('mes-atual'), []);
 
-  useEffect(() => {
-    void carregarDados();
-  }, [empresaSelecionada, periodo, escopoTodas]);
+  const [tipo, setTipo] = useState<TipoRelatorio>('dre');
+  const [dataInicio, setDataInicio] = useState(mesPadrao.dataInicio);
+  const [dataFim, setDataFim] = useState(mesPadrao.dataFim);
+  const [escopo, setEscopo] = useState<'selecionada' | 'todas'>(
+    empresaSelecionada ? 'selecionada' : 'todas'
+  );
+  const [loading, setLoading] = useState(false);
+  const [relatorio, setRelatorio] = useState<RelatorioCompleto | null>(null);
+  const [geradoEm, setGeradoEm] = useState<Date | null>(null);
+  const [meta, setMeta] = useState<{
+    tipo: TipoRelatorio;
+    dataInicio: string;
+    dataFim: string;
+    escopoLabel: string;
+    empresaNome: string;
+    empresaCnpj: string;
+  } | null>(null);
 
-  const carregarDados = async () => {
+  const tipoInfo = TIPOS.find((t) => t.id === tipo)!;
+
+  const gerar = async () => {
+    if (!dataInicio || !dataFim) {
+      toast.error('Informe o período (data início e fim).');
+      return;
+    }
+    if (dataInicio > dataFim) {
+      toast.error('A data início não pode ser maior que a data fim.');
+      return;
+    }
+
+    const usarTodas = escopo === 'todas' || !empresaSelecionada;
+    if (!usarTodas && !empresaSelecionada) {
+      toast.error('Selecione uma empresa ou use “Todas as empresas”.');
+      return;
+    }
+
     setLoading(true);
     try {
-      const { dataInicio, dataFim } = calcularIntervaloPeriodo(periodo);
-      setPeriodoLabel(`${dataInicio} → ${dataFim}`);
-
-      const usarTodas = escopoTodas || !empresaSelecionada;
-      const filtro = {
+      const dados = await gerarRelatorioCompleto({
         empresaId: usarTodas ? undefined : empresaSelecionada,
         dataInicio,
         dataFim,
-      };
-
-      console.log('📊 Gerando relatório:', {
-        escopo: usarTodas ? 'TODAS AS EMPRESAS' : empresaAtual?.nome || empresaSelecionada,
-        periodo,
+      });
+      setRelatorio(dados);
+      setGeradoEm(new Date());
+      setMeta({
+        tipo,
         dataInicio,
         dataFim,
+        escopoLabel: usarTodas
+          ? `Todas as empresas (${empresas.length})`
+          : empresaAtual?.nome || 'Empresa selecionada',
+        empresaNome: usarTodas
+          ? 'Consolidado — Todas as empresas'
+          : empresaAtual?.nome || 'Empresa',
+        empresaCnpj: usarTodas ? '—' : empresaAtual?.cnpj || '—',
       });
-
-      const rel: RelatorioCompleto = await gerarRelatorioCompleto(filtro);
-
-      setDados(rel);
-      setAgingData(rel.agingData);
-      setGastosPorFornecedor(rel.gastosPorFornecedor);
-      setLancamentosDetalhe(rel.lancamentosDetalhe);
-      setReceitasDetalhe(rel.receitasDetalhe);
-      setDespesasDetalhe(rel.despesasDetalhe);
-      setPorEmpresa(rel.porEmpresa);
-      setQtdLancamentos(rel.qtdLancamentos);
-
-      if (rel.qtdLancamentos === 0) {
-        toast.message('Nenhum lançamento no período', {
-          description: 'Tente "Todo período" ou amplie o filtro (Anual).',
-        });
-      }
+      toast.success('Relatório gerado');
     } catch (error) {
-      console.error('❌ Erro ao carregar dados do relatório:', error);
-      toast.error('Erro ao gerar relatório. Verifique a conexão com a API.');
-      setDados({
-        receitaBruta: 0,
-        impostos: 0,
-        receitaLiquida: 0,
-        custosVariaveis: 0,
-        margemContribuicao: 0,
-        despesasFixas: 0,
-        ebitda: 0,
-        depreciacaoAmortizacao: 0,
-        ebit: 0,
-        despesasFinanceiras: 0,
-        receitasFinanceiras: 0,
-        lair: 0,
-        impostoRenda: 0,
-        lucroLiquido: 0,
-        saldoInicial: 0,
-        entradas: 0,
-        saidas: 0,
-        saldoFinal: 0,
-        burnRate: 0,
-        margemBruta: 0,
-        margemLiquida: 0,
-        roi: 0,
-        pontoEquilibrio: 0,
-        pmp: 0,
-        pmr: 0,
-        pme: 0,
-        totalReceber: 0,
-        totalVencido: 0,
-        percentualInadimplencia: 0,
-        provisaoDevedoresDuvidosos: 0,
-        orcadoReceita: 0,
-        orcadoDespesas: 0,
-        desvioReceita: 0,
-        desvioDespesas: 0,
-      });
-      setAgingData([]);
-      setGastosPorFornecedor([]);
-      setLancamentosDetalhe([]);
-      setReceitasDetalhe([]);
-      setDespesasDetalhe([]);
-      setPorEmpresa([]);
-      setQtdLancamentos(0);
+      console.error(error);
+      toast.error('Falha ao gerar relatório. Verifique a API.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading || !dados) {
-    return (
-      <div className="p-8">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Gerando relatórios...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const aplicarAtalho = (periodo: string) => {
+    const p = calcularIntervaloPeriodo(periodo);
+    setDataInicio(p.dataInicio);
+    setDataFim(p.dataFim);
+  };
 
-  const receitaBase = dados.receitaLiquida || 1;
-  const escopoLabel =
-    escopoTodas || !empresaSelecionada
-      ? `Todas as empresas (${empresas.length})`
-      : empresaAtual?.nome || 'Empresa selecionada';
-
-  const imprimirRelatorio = () => {
+  const imprimir = () => {
+    if (!relatorio || !meta) {
+      toast.error('Gere o relatório antes de imprimir.');
+      return;
+    }
     window.print();
   };
 
-  const dreData = [
-    { nome: 'Receita Bruta', valor: dados.receitaBruta },
-    { nome: 'Impostos', valor: -dados.impostos },
-    { nome: 'Custos Variáveis', valor: -dados.custosVariaveis },
-    { nome: 'Despesas Fixas', valor: -dados.despesasFixas },
-    { nome: 'Lucro Líquido', valor: dados.lucroLiquido },
-  ];
+  const exportarCsv = () => {
+    if (!relatorio || !meta) {
+      toast.error('Gere o relatório antes de exportar.');
+      return;
+    }
 
-  const fluxoCaixaData = [
-    { nome: 'Saldo Inicial', valor: dados.saldoInicial },
-    { nome: 'Entradas', valor: dados.entradas },
-    { nome: 'Saídas', valor: dados.saidas },
-    { nome: 'Saldo Final', valor: dados.saldoFinal },
-  ];
+    let rows: string[][] = [];
+    if (meta.tipo === 'lancamentos') {
+      rows = [
+        ['Data', 'Empresa', 'Tipo', 'Descrição', 'Status', 'Valor'],
+        ...relatorio.lancamentosDetalhe.map((l) => [
+          l.data,
+          l.empresaNome,
+          l.tipo,
+          l.descricao,
+          l.status,
+          String(l.valor),
+        ]),
+      ];
+    } else if (meta.tipo === 'por-empresa') {
+      rows = [
+        ['Empresa', 'Receitas', 'Despesas', 'Resultado'],
+        ...relatorio.porEmpresa.map((e) => [
+          e.empresaNome,
+          String(e.receitas),
+          String(e.despesas),
+          String(e.resultado),
+        ]),
+      ];
+    } else if (meta.tipo === 'aging') {
+      rows = [
+        ['Faixa', 'Valor', '%', 'Qtd'],
+        ...relatorio.agingData.map((a) => [
+          a.periodo,
+          String(a.valor),
+          String(a.percentual),
+          String(a.quantidade),
+        ]),
+      ];
+    } else if (meta.tipo === 'dre') {
+      rows = [
+        ['Descrição', 'Valor', 'AV%'],
+        ['Receita Bruta', String(relatorio.receitaBruta), ''],
+        ['(-) Impostos', String(relatorio.impostos), ''],
+        ['Receita Líquida', String(relatorio.receitaLiquida), '100'],
+        ['(-) Custos Variáveis', String(relatorio.custosVariaveis), ''],
+        ['Margem de Contribuição', String(relatorio.margemContribuicao), ''],
+        ['(-) Despesas Fixas', String(relatorio.despesasFixas), ''],
+        ['EBITDA', String(relatorio.ebitda), ''],
+        ['(-) Depreciação/Amortização', String(relatorio.depreciacaoAmortizacao), ''],
+        ['EBIT', String(relatorio.ebit), ''],
+        ['(+/-) Resultado Financeiro', String(relatorio.receitasFinanceiras - relatorio.despesasFinanceiras), ''],
+        ['LAIR', String(relatorio.lair), ''],
+        ['(-) IR/CSLL', String(relatorio.impostoRenda), ''],
+        ['Lucro Líquido', String(relatorio.lucroLiquido), ''],
+      ];
+    } else {
+      rows = [
+        ['Item', 'Valor'],
+        ['Saldo Inicial', String(relatorio.saldoInicial)],
+        ['Entradas', String(relatorio.entradas)],
+        ['Saídas', String(relatorio.saidas)],
+        ['Saldo Final', String(relatorio.saldoFinal)],
+      ];
+    }
 
-  const margemData = [
-    { nome: 'Receita Líquida', valor: dados.receitaLiquida, margem: 100 },
-    { nome: 'Margem Contrib.', valor: dados.margemContribuicao, margem: dados.margemBruta },
-    { nome: 'EBITDA', valor: dados.ebitda, margem: (dados.ebitda / receitaBase) * 100 },
-    { nome: 'Lucro Líquido', valor: dados.lucroLiquido, margem: dados.margemLiquida },
-  ];
+    const csv = rows
+      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';'))
+      .join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sisfinance-${meta.tipo}-${meta.dataInicio}-${meta.dataFim}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
-  const comparativoData = [
-    {
-      categoria: 'Receitas',
-      orcado: dados.orcadoReceita,
-      realizado: dados.receitaBruta,
-      desvio: dados.desvioReceita,
-    },
-    {
-      categoria: 'Despesas',
-      orcado: dados.orcadoDespesas,
-      realizado: dados.saidas,
-      desvio: dados.desvioDespesas,
-    },
-  ];
-
-  const cicloFinanceiroData = [
-    { indicador: 'PMR', dias: dados.pmr, descricao: 'Prazo Médio de Recebimento' },
-    { indicador: 'PME', dias: dados.pme, descricao: 'Prazo Médio de Estoque' },
-    { indicador: 'PMP', dias: dados.pmp, descricao: 'Prazo Médio de Pagamento' },
-    {
-      indicador: 'CCF',
-      dias: dados.pmr + dados.pme - dados.pmp,
-      descricao: 'Ciclo de Caixa Financeiro',
-    },
-  ];
+  const base = relatorio?.receitaLiquida || 0;
 
   return (
-    <div id="relatorio-print-area" className="space-y-6">
-      <div className="no-print">
+    <div className="space-y-6">
+      {/* Controles — não imprimem */}
+      <div className="no-print space-y-6">
         <PageHeader
           title="Relatórios Financeiros"
-          description={`Análise detalhada — ${escopoLabel}`}
+          description="Gere documentos formais (DRE, fluxo, extrato, aging) para impressão ou exportação."
           icon={FileText}
         />
-      </div>
 
-      <div className="print-only mb-4">
-        <h1 className="text-2xl font-bold">SisFinance — Relatório Financeiro</h1>
-        <p>
-          Escopo: {escopoLabel} | Período: {periodoLabel}
-        </p>
-        <p className="text-sm">Gerado em {new Date().toLocaleString('pt-BR')}</p>
-      </div>
+        <div className="rounded-xl border bg-card p-4 sm:p-6 space-y-5 shadow-sm">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Tipo de relatório</Label>
+              <Select value={tipo} onValueChange={(v) => setTipo(v as TipoRelatorio)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIPOS.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.titulo} — {t.descricao}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-      {/* Filtros e Ações */}
-      <div className="no-print flex flex-col gap-4">
-        <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant={periodo === 'semana' ? 'default' : 'outline'}
-              onClick={() => setPeriodo('semana')}
-              size="sm"
-            >
-              Semanal
-            </Button>
-            <Button
-              variant={periodo === 'mes-atual' ? 'default' : 'outline'}
-              onClick={() => setPeriodo('mes-atual')}
-              size="sm"
-            >
-              Mensal
-            </Button>
-            <Button
-              variant={periodo === 'trimestre' ? 'default' : 'outline'}
-              onClick={() => setPeriodo('trimestre')}
-              size="sm"
-            >
-              Trimestral
-            </Button>
-            <Button
-              variant={periodo === 'ano' ? 'default' : 'outline'}
-              onClick={() => setPeriodo('ano')}
-              size="sm"
-            >
-              Anual
-            </Button>
-            <Button
-              variant={periodo === 'tudo' ? 'default' : 'outline'}
-              onClick={() => setPeriodo('tudo')}
-              size="sm"
-            >
-              Todo período
-            </Button>
+            <div className="space-y-2">
+              <Label>Escopo</Label>
+              <Select
+                value={escopo}
+                onValueChange={(v) => setEscopo(v as 'selecionada' | 'todas')}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todas as empresas</SelectItem>
+                  <SelectItem value="selecionada" disabled={!empresaSelecionada}>
+                    {empresaSelecionada
+                      ? `Somente: ${empresaAtual?.nome || 'selecionada'}`
+                      : 'Selecione uma empresa no menu'}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {periodoLabel && (
-              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                <Calendar className="h-3.5 w-3.5" />
-                {periodoLabel}
-              </span>
-            )}
-            <Button
-              variant={escopoTodas || !empresaSelecionada ? 'default' : 'outline'}
-              size="sm"
-              className="gap-2"
-              onClick={() => setEscopoTodas(true)}
-            >
-              <Building2 className="h-4 w-4" />
-              Todas empresas
-            </Button>
-            {empresaSelecionada && (
-              <Button
-                variant={!escopoTodas ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setEscopoTodas(false)}
-              >
-                Só selecionada
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+            <div className="space-y-2">
+              <Label htmlFor="data-inicio">Data início</Label>
+              <Input
+                id="data-inicio"
+                type="date"
+                value={dataInicio}
+                onChange={(e) => setDataInicio(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="data-fim">Data fim</Label>
+              <Input
+                id="data-fim"
+                type="date"
+                value={dataFim}
+                onChange={(e) => setDataFim(e.target.value)}
+              />
+            </div>
+            <div className="sm:col-span-2 flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('semana')}>
+                Semana
               </Button>
-            )}
-            <Button onClick={imprimirRelatorio} variant="outline" className="gap-2">
-              <Printer className="h-4 w-4" />
-              Imprimir
+              <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('mes-atual')}>
+                Mês
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('trimestre')}>
+                Trimestre
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('ano')}>
+                Ano
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('tudo')}>
+                Todo período
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-2 border-t">
+            <Button onClick={() => void gerar()} disabled={loading} className="gap-2">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              Gerar relatório
             </Button>
-            <Button onClick={imprimirRelatorio} variant="outline" className="gap-2">
+            <Button variant="outline" onClick={imprimir} disabled={!relatorio} className="gap-2">
+              <Printer className="h-4 w-4" />
+              Imprimir / PDF
+            </Button>
+            <Button variant="outline" onClick={exportarCsv} disabled={!relatorio} className="gap-2">
               <Download className="h-4 w-4" />
-              PDF
+              Exportar CSV
             </Button>
           </div>
         </div>
-
-        {!empresaSelecionada && !escopoTodas && (
-          <Alert>
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              Nenhuma empresa selecionada no menu — exibindo <strong>todas as empresas</strong>.
-              Use o seletor do topo para filtrar uma empresa específica.
-            </AlertDescription>
-          </Alert>
-        )}
       </div>
 
-      <Tabs defaultValue="lancamentos" className="space-y-6">
-        <TabsList className="no-print grid grid-cols-3 lg:grid-cols-10 gap-2 h-auto">
-          <TabsTrigger value="lancamentos">Lançamentos</TabsTrigger>
-          <TabsTrigger value="por-empresa">Por Empresa</TabsTrigger>
-          <TabsTrigger value="receitas">Receitas</TabsTrigger>
-          <TabsTrigger value="despesas">Despesas</TabsTrigger>
-          <TabsTrigger value="sumario">Sumário</TabsTrigger>
-          <TabsTrigger value="dre">DRE</TabsTrigger>
-          <TabsTrigger value="fluxo-caixa">Fluxo de Caixa</TabsTrigger>
-          <TabsTrigger value="kpis">KPIs</TabsTrigger>
-          <TabsTrigger value="fornecedores">Fornecedores</TabsTrigger>
-          <TabsTrigger value="inadimplencia">Inadimplência</TabsTrigger>
-        </TabsList>
-
-        {/* ===== LANÇAMENTOS (RELATÓRIO PROFISSIONAL) ===== */}
-        <TabsContent value="lancamentos" className="space-y-6">
-          <Card className="border-primary/20">
-            <CardHeader className="border-b bg-muted/30">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-xl">
-                    <Receipt className="h-6 w-6 text-primary" />
-                    Relatório de Lançamentos
-                  </CardTitle>
-                  <CardDescription className="mt-2 space-y-1">
-                    <span className="block">Escopo: <strong>{escopoLabel}</strong></span>
-                    <span className="block">Período: <strong>{periodoLabel || '—'}</strong></span>
-                    <span className="block text-xs">
-                      Emitido em {new Date().toLocaleString('pt-BR')}
-                    </span>
-                  </CardDescription>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="outline" className="text-sm px-3 py-1">
-                    {qtdLancamentos} lançamentos
-                  </Badge>
-                  <Badge className="bg-green-500/15 text-green-600 border-green-500/30 text-sm px-3 py-1">
-                    Receitas{' '}
-                    {formatarMoeda(
-                      lancamentosDetalhe
-                        .filter((l) => l.tipo === 'Receita')
-                        .reduce((s, l) => s + l.valor, 0)
-                    )}
-                  </Badge>
-                  <Badge className="bg-red-500/15 text-red-500 border-red-500/30 text-sm px-3 py-1">
-                    Despesas{' '}
-                    {formatarMoeda(
-                      lancamentosDetalhe
-                        .filter((l) => l.tipo === 'Despesa')
-                        .reduce((s, l) => s + l.valor, 0)
-                    )}
-                  </Badge>
-                </div>
+      {/* Documento do relatório */}
+      {!relatorio || !meta ? (
+        <div className="no-print rounded-xl border border-dashed p-12 text-center text-muted-foreground">
+          <Calendar className="h-10 w-10 mx-auto mb-3 opacity-50" />
+          <p className="font-medium text-foreground">Nenhum relatório gerado</p>
+          <p className="text-sm mt-1">
+            Selecione o tipo, o período e clique em <strong>Gerar relatório</strong>.
+          </p>
+        </div>
+      ) : (
+        <article id="relatorio-print-area" className="relatorio-documento bg-white text-slate-900 rounded-xl border shadow-sm overflow-hidden">
+          {/* Cabeçalho formal */}
+          <header className="border-b px-6 py-5 sm:px-8 bg-slate-50">
+            <div className="flex flex-col sm:flex-row sm:justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold tracking-[0.2em] uppercase text-slate-500">
+                  SisFinance
+                </p>
+                <h1 className="text-xl sm:text-2xl font-bold mt-1 text-slate-900">
+                  {TIPOS.find((t) => t.id === meta.tipo)?.titulo}
+                </h1>
+                <p className="text-sm text-slate-600 mt-1">
+                  {TIPOS.find((t) => t.id === meta.tipo)?.descricao}
+                </p>
               </div>
-            </CardHeader>
-            <CardContent className="pt-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Card className="bg-slate-50 dark:bg-slate-900/40">
-                  <CardContent className="pt-5">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Total lançamentos</p>
-                    <p className="text-2xl font-bold mt-1">{qtdLancamentos}</p>
-                  </CardContent>
-                </Card>
-                <Card className="bg-green-50 dark:bg-green-950/20 border-green-200/50">
-                  <CardContent className="pt-5">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Receitas</p>
-                    <p className="text-2xl font-bold text-green-600 mt-1">
-                      {formatarMoeda(
-                        lancamentosDetalhe
-                          .filter((l) => l.tipo === 'Receita')
-                          .reduce((s, l) => s + l.valor, 0)
-                      )}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="bg-red-50 dark:bg-red-950/20 border-red-200/50">
-                  <CardContent className="pt-5">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Despesas</p>
-                    <p className="text-2xl font-bold text-red-500 mt-1">
-                      {formatarMoeda(
-                        lancamentosDetalhe
-                          .filter((l) => l.tipo === 'Despesa')
-                          .reduce((s, l) => s + l.valor, 0)
-                      )}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200/50">
-                  <CardContent className="pt-5">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Saldo (Rec − Desp)</p>
-                    <p className="text-2xl font-bold text-blue-600 mt-1">
-                      {formatarMoeda(
-                        lancamentosDetalhe
-                          .filter((l) => l.tipo === 'Receita')
-                          .reduce((s, l) => s + l.valor, 0) -
-                          lancamentosDetalhe
-                            .filter((l) => l.tipo === 'Despesa')
-                            .reduce((s, l) => s + l.valor, 0)
-                      )}
-                    </p>
-                  </CardContent>
-                </Card>
+              <div className="text-sm text-slate-600 sm:text-right space-y-1">
+                <p className="flex items-center gap-1.5 sm:justify-end">
+                  <Building2 className="h-3.5 w-3.5" />
+                  <span className="font-medium text-slate-900">{meta.empresaNome}</span>
+                </p>
+                <p>CNPJ: {meta.empresaCnpj}</p>
+                <p>
+                  Período: {formatarDataBR(meta.dataInicio)} a {formatarDataBR(meta.dataFim)}
+                </p>
+                <p>
+                  Emitido em:{' '}
+                  {geradoEm?.toLocaleString('pt-BR', {
+                    dateStyle: 'short',
+                    timeStyle: 'short',
+                  })}
+                </p>
               </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Badge variant="outline" className="border-slate-300 text-slate-700">
+                Escopo: {meta.escopoLabel}
+              </Badge>
+              <Badge variant="outline" className="border-slate-300 text-slate-700">
+                {relatorio.qtdLancamentos} lançamentos
+              </Badge>
+              {meta.tipo === 'dre' && (
+                <Badge variant="outline" className="border-slate-300 text-slate-700">
+                  Regime: Competência
+                </Badge>
+              )}
+              {meta.tipo === 'fluxo' && (
+                <Badge variant="outline" className="border-slate-300 text-slate-700">
+                  Regime: Caixa
+                </Badge>
+              )}
+            </div>
+          </header>
 
-              {qtdLancamentos === 0 ? (
-                <Alert>
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>
-                    Nenhum lançamento encontrado neste período/escopo. Clique em{' '}
-                    <strong>Todo período</strong> ou confira se os lançamentos têm data e empresa
-                    preenchidos em <strong>Lançamentos</strong>.
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <div className="overflow-x-auto rounded-lg border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/50">
-                        <TableHead className="w-[40px]">#</TableHead>
-                        <TableHead>Data</TableHead>
-                        <TableHead>Empresa</TableHead>
-                        <TableHead>Tipo</TableHead>
-                        <TableHead>Descrição</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Forma / Fornecedor</TableHead>
-                        <TableHead className="text-right">Valor</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {lancamentosDetalhe.map((item, index) => (
-                        <TableRow key={item.id}>
-                          <TableCell className="text-muted-foreground text-xs">{index + 1}</TableCell>
-                          <TableCell className="whitespace-nowrap font-medium">
-                            {item.data
-                              ? item.data.split('-').reverse().join('/')
-                              : '-'}
-                          </TableCell>
-                          <TableCell>{item.empresaNome}</TableCell>
-                          <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={
-                                item.tipo === 'Receita'
-                                  ? 'border-green-500/40 text-green-600'
-                                  : item.tipo === 'Despesa'
-                                    ? 'border-red-500/40 text-red-500'
+          <div className="px-6 py-6 sm:px-8 space-y-8">
+            {/* DRE */}
+            {meta.tipo === 'dre' && (
+              <section>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-3">
+                  Demonstrativo de Resultado
+                </h2>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[55%]">Descrição</TableHead>
+                      <TableHead className="text-right">Valor (R$)</TableHead>
+                      <TableHead className="text-right">AV %</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {linhaDre('RECEITA BRUTA', relatorio.receitaBruta, base || relatorio.receitaBruta || 1, {
+                      bold: true,
+                    })}
+                    {linhaDre('(-) Impostos / deduções sobre vendas', relatorio.impostos, base || 1, {
+                      indent: true,
+                      negativo: true,
+                      nota: relatorio.impostosEstimados ? 'estimado' : undefined,
+                    })}
+                    {linhaDre('= RECEITA LÍQUIDA', relatorio.receitaLiquida, base || 1, { bold: true })}
+                    {linhaDre('(-) Custos variáveis (CMV/CPV/comissões)', relatorio.custosVariaveis, base || 1, {
+                      indent: true,
+                      negativo: true,
+                    })}
+                    {linhaDre('= MARGEM DE CONTRIBUIÇÃO', relatorio.margemContribuicao, base || 1, {
+                      bold: true,
+                    })}
+                    {linhaDre('(-) Despesas operacionais / fixas', relatorio.despesasFixas, base || 1, {
+                      indent: true,
+                      negativo: true,
+                    })}
+                    {linhaDre('= EBITDA', relatorio.ebitda, base || 1, { bold: true })}
+                    {linhaDre('(-) Depreciação / amortização', relatorio.depreciacaoAmortizacao, base || 1, {
+                      indent: true,
+                      negativo: true,
+                    })}
+                    {linhaDre('= EBIT (resultado operacional)', relatorio.ebit, base || 1, { bold: true })}
+                    {linhaDre('(+) Receitas financeiras', relatorio.receitasFinanceiras, base || 1, {
+                      indent: true,
+                    })}
+                    {linhaDre('(-) Despesas financeiras', relatorio.despesasFinanceiras, base || 1, {
+                      indent: true,
+                      negativo: true,
+                    })}
+                    {linhaDre('= LAIR', relatorio.lair, base || 1, { bold: true })}
+                    {linhaDre('(-) IR / CSLL', relatorio.impostoRenda, base || 1, {
+                      indent: true,
+                      negativo: true,
+                      nota: relatorio.irEstimado ? 'estimado' : undefined,
+                    })}
+                    {linhaDre('= LUCRO LÍQUIDO', relatorio.lucroLiquido, base || 1, { bold: true })}
+                  </TableBody>
+                </Table>
+                <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                  <div className="rounded border p-3">
+                    <p className="text-xs text-slate-500">Margem bruta</p>
+                    <p className="font-semibold">{formatarPorcentagem(relatorio.margemBruta)}</p>
+                  </div>
+                  <div className="rounded border p-3">
+                    <p className="text-xs text-slate-500">Margem líquida</p>
+                    <p className="font-semibold">{formatarPorcentagem(relatorio.margemLiquida)}</p>
+                  </div>
+                  <div className="rounded border p-3">
+                    <p className="text-xs text-slate-500">EBITDA</p>
+                    <p className="font-semibold">{formatarMoeda(relatorio.ebitda)}</p>
+                  </div>
+                  <div className="rounded border p-3">
+                    <p className="text-xs text-slate-500">Lucro líquido</p>
+                    <p className="font-semibold">{formatarMoeda(relatorio.lucroLiquido)}</p>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* Fluxo */}
+            {meta.tipo === 'fluxo' && (
+              <section>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-3">
+                  Demonstrativo de Fluxo de Caixa
+                </h2>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Descrição</TableHead>
+                      <TableHead className="text-right">Valor (R$)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell>Saldo inicial</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatarMoeda(relatorio.saldoInicial)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>(+) Entradas no período</TableCell>
+                      <TableCell className="text-right tabular-nums text-green-700">
+                        {formatarMoeda(relatorio.entradas)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>(−) Saídas no período</TableCell>
+                      <TableCell className="text-right tabular-nums text-red-700">
+                        {formatarMoeda(relatorio.saidas)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow className="font-semibold bg-muted/40">
+                      <TableCell>= Saldo final</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatarMoeda(relatorio.saldoFinal)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>Variação líquida do período</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatarMoeda(relatorio.entradas - relatorio.saidas)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>Burn rate (média mensal de saídas)</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatarMoeda(relatorio.burnRate)}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </section>
+            )}
+
+            {/* Lançamentos */}
+            {meta.tipo === 'lancamentos' && (
+              <section>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-3">
+                  Extrato de Lançamentos ({relatorio.qtdLancamentos})
+                </h2>
+                {relatorio.qtdLancamentos === 0 ? (
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      Nenhum lançamento no período selecionado.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-10">#</TableHead>
+                          <TableHead>Data</TableHead>
+                          <TableHead>Empresa</TableHead>
+                          <TableHead>Tipo</TableHead>
+                          <TableHead>Descrição</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Valor</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {relatorio.lancamentosDetalhe.map((l, i) => (
+                          <TableRow key={l.id}>
+                            <TableCell className="text-xs text-slate-500">{i + 1}</TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              {formatarDataBR(l.data)}
+                            </TableCell>
+                            <TableCell>{l.empresaNome}</TableCell>
+                            <TableCell>{l.tipo}</TableCell>
+                            <TableCell className="max-w-[280px]">{l.descricao}</TableCell>
+                            <TableCell>{l.status}</TableCell>
+                            <TableCell
+                              className={`text-right tabular-nums font-medium ${
+                                l.tipo === 'Receita'
+                                  ? 'text-green-700'
+                                  : l.tipo === 'Despesa'
+                                    ? 'text-red-700'
                                     : ''
-                              }
+                              }`}
                             >
-                              {item.tipo}
-                            </Badge>
+                              {l.tipo === 'Despesa' ? '−' : l.tipo === 'Receita' ? '+' : ''}
+                              {formatarMoeda(l.valor)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="font-semibold bg-muted/40 border-t-2">
+                          <TableCell colSpan={6}>
+                            Total (Receitas − Despesas)
                           </TableCell>
-                          <TableCell className="max-w-[280px]">
-                            <span className="line-clamp-2">{item.descricao}</span>
-                          </TableCell>
-                          <TableCell>{item.status}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {[item.formaPagamento, item.terceiro].filter(Boolean).join(' · ') ||
-                              '-'}
-                          </TableCell>
-                          <TableCell
-                            className={`text-right font-semibold tabular-nums ${
-                              item.tipo === 'Receita'
-                                ? 'text-green-600'
-                                : item.tipo === 'Despesa'
-                                  ? 'text-red-500'
-                                  : ''
-                            }`}
-                          >
-                            {item.tipo === 'Despesa' ? '−' : '+'}
-                            {formatarMoeda(item.valor)}
+                          <TableCell className="text-right tabular-nums">
+                            {formatarMoeda(
+                              relatorio.lancamentosDetalhe
+                                .filter((l) => l.tipo === 'Receita')
+                                .reduce((s, l) => s + l.valor, 0) -
+                                relatorio.lancamentosDetalhe
+                                  .filter((l) => l.tipo === 'Despesa')
+                                  .reduce((s, l) => s + l.valor, 0)
+                            )}
                           </TableCell>
                         </TableRow>
-                      ))}
-                      <TableRow className="bg-muted/40 font-bold border-t-2">
-                        <TableCell colSpan={7}>TOTAL DO PERÍODO</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatarMoeda(
-                            lancamentosDetalhe
-                              .filter((l) => l.tipo === 'Receita')
-                              .reduce((s, l) => s + l.valor, 0) -
-                              lancamentosDetalhe
-                                .filter((l) => l.tipo === 'Despesa')
-                                .reduce((s, l) => s + l.valor, 0)
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </section>
+            )}
 
-              <p className="text-xs text-muted-foreground print-only">
-                SisFinance — Relatório de Lançamentos · Documento gerado automaticamente
-              </p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ===== POR EMPRESA ===== */}
-        <TabsContent value="por-empresa" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Building2 className="h-5 w-5 text-primary" />
-                Relatório por Empresa
-              </CardTitle>
-              <CardDescription>
-                Receitas e despesas de cada empresa cadastrada no período {periodoLabel}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className="bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/20">
-                  <CardContent className="pt-6">
-                    <p className="text-sm text-muted-foreground mb-1">Total Receitas</p>
-                    <p className="text-2xl font-bold text-green-500">
-                      {formatarMoeda(receitasDetalhe.reduce((s, r) => s + r.valor, 0))}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/20">
-                  <CardContent className="pt-6">
-                    <p className="text-sm text-muted-foreground mb-1">Total Despesas</p>
-                    <p className="text-2xl font-bold text-red-400">
-                      {formatarMoeda(despesasDetalhe.reduce((s, d) => s + d.valor, 0))}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
-                  <CardContent className="pt-6">
-                    <p className="text-sm text-muted-foreground mb-1">Resultado</p>
-                    <p className="text-2xl font-bold">
-                      {formatarMoeda(
-                        receitasDetalhe.reduce((s, r) => s + r.valor, 0) -
-                          despesasDetalhe.reduce((s, d) => s + d.valor, 0)
-                      )}
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <div className="overflow-x-auto">
+            {/* Por empresa */}
+            {meta.tipo === 'por-empresa' && (
+              <section>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-3">
+                  Resultado por Empresa
+                </h2>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -760,1417 +664,117 @@ export function Relatorios() {
                       <TableHead className="text-right">Despesas</TableHead>
                       <TableHead className="text-right">% Desp.</TableHead>
                       <TableHead className="text-right">Resultado</TableHead>
-                      <TableHead className="text-right">Qtd Rec.</TableHead>
-                      <TableHead className="text-right">Qtd Desp.</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {porEmpresa.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
-                          Nenhuma empresa com movimentos no período
+                    {relatorio.porEmpresa.map((e) => (
+                      <TableRow key={e.empresaId}>
+                        <TableCell className="font-medium">{e.empresaNome}</TableCell>
+                        <TableCell className="text-right tabular-nums text-green-700">
+                          {formatarMoeda(e.receitas)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-500">
+                          {formatarPorcentagem(e.percentualReceitas)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-red-700">
+                          {formatarMoeda(e.despesas)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-500">
+                          {formatarPorcentagem(e.percentualDespesas)}
+                        </TableCell>
+                        <TableCell
+                          className={`text-right tabular-nums font-semibold ${
+                            e.resultado >= 0 ? 'text-green-700' : 'text-red-700'
+                          }`}
+                        >
+                          {formatarMoeda(e.resultado)}
                         </TableCell>
                       </TableRow>
-                    ) : (
-                      porEmpresa.map((emp) => (
-                        <TableRow key={emp.empresaId}>
-                          <TableCell className="font-medium">{emp.empresaNome}</TableCell>
-                          <TableCell className="text-right text-green-500">
-                            {formatarMoeda(emp.receitas)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {formatarPorcentagem(emp.percentualReceitas)}
-                          </TableCell>
-                          <TableCell className="text-right text-red-400">
-                            {formatarMoeda(emp.despesas)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {formatarPorcentagem(emp.percentualDespesas)}
-                          </TableCell>
-                          <TableCell
-                            className={`text-right font-semibold ${
-                              emp.resultado >= 0 ? 'text-green-500' : 'text-red-400'
-                            }`}
-                          >
-                            {formatarMoeda(emp.resultado)}
-                          </TableCell>
-                          <TableCell className="text-right">{emp.qtdReceitas}</TableCell>
-                          <TableCell className="text-right">{emp.qtdDespesas}</TableCell>
-                        </TableRow>
-                      ))
-                    )}
+                    ))}
                   </TableBody>
                 </Table>
-              </div>
+              </section>
+            )}
 
-              {porEmpresa.length > 0 && (
-                <div>
-                  <h3 className="text-lg font-semibold mb-4">Despesas por Empresa</h3>
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart data={porEmpresa}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis dataKey="empresaNome" stroke="#9ca3af" />
-                      <YAxis stroke="#9ca3af" tickFormatter={(v) => formatarMoeda(v)} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }}
-                        formatter={(value: number) => formatarMoeda(value)}
-                      />
-                      <Legend />
-                      <Bar dataKey="receitas" fill={COLORS.success} name="Receitas" />
-                      <Bar dataKey="despesas" fill={COLORS.danger} name="Despesas" />
-                    </BarChart>
-                  </ResponsiveContainer>
+            {/* Aging */}
+            {meta.tipo === 'aging' && (
+              <section>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-3">
+                  Aging — Contas a Receber em Aberto
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 text-sm">
+                  <div className="rounded border p-3">
+                    <p className="text-xs text-slate-500">Total a receber</p>
+                    <p className="font-semibold">{formatarMoeda(relatorio.totalReceber)}</p>
+                  </div>
+                  <div className="rounded border p-3">
+                    <p className="text-xs text-slate-500">Total vencido</p>
+                    <p className="font-semibold">{formatarMoeda(relatorio.totalVencido)}</p>
+                  </div>
+                  <div className="rounded border p-3">
+                    <p className="text-xs text-slate-500">% Inadimplência</p>
+                    <p className="font-semibold">
+                      {formatarPorcentagem(relatorio.percentualInadimplencia)}
+                    </p>
+                  </div>
+                  <div className="rounded border p-3">
+                    <p className="text-xs text-slate-500">Provisão (30% vencido)</p>
+                    <p className="font-semibold">
+                      {formatarMoeda(relatorio.provisaoDevedoresDuvidosos)}
+                    </p>
+                  </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ===== RECEITAS DETALHADAS ===== */}
-        <TabsContent value="receitas" className="space-y-6 print-break">
-          <TabelaMovimentos
-            titulo="Receitas Detalhadas"
-            itens={receitasDetalhe}
-            tipo="Receita"
-          />
-        </TabsContent>
-
-        {/* ===== DESPESAS DETALHADAS ===== */}
-        <TabsContent value="despesas" className="space-y-6 print-break">
-          <TabelaMovimentos
-            titulo="Despesas Detalhadas"
-            itens={despesasDetalhe}
-            tipo="Despesa"
-          />
-        </TabsContent>
-
-        {/* ===== SUMÁRIO EXECUTIVO ===== */}
-        <TabsContent value="sumario" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Activity className="h-5 w-5 text-primary" />
-                Sumário Executivo
-              </CardTitle>
-              <CardDescription>
-                Visão macro da saúde financeira —{' '}
-                {periodo === 'semana'
-                  ? 'SEMANAL'
-                  : periodo === 'trimestre'
-                    ? 'TRIMESTRAL'
-                    : periodo === 'ano'
-                      ? 'ANUAL'
-                      : 'MENSAL'}
-                {periodoLabel ? ` (${periodoLabel})` : ''}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Indicadores Principais */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <Card className="bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/20">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium text-muted-foreground">Receita Líquida</p>
-                      <TrendingUp className="h-4 w-4 text-green-500" />
-                    </div>
-                    <p className="text-2xl font-bold">{formatarMoeda(dados.receitaLiquida)}</p>
-                    <p className="text-xs text-green-600 mt-1">
-                      +{formatarPorcentagem(dados.desvioReceita)} vs orçado
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium text-muted-foreground">Lucro Líquido</p>
-                      <DollarSign className="h-4 w-4 text-blue-500" />
-                    </div>
-                    <p className="text-2xl font-bold">{formatarMoeda(dados.lucroLiquido)}</p>
-                    <p className="text-xs text-blue-600 mt-1">
-                      {formatarPorcentagem(dados.margemLiquida)} margem líquida
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border-purple-500/20">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium text-muted-foreground">EBITDA</p>
-                      <Zap className="h-4 w-4 text-purple-500" />
-                    </div>
-                    <p className="text-2xl font-bold">{formatarMoeda(dados.ebitda)}</p>
-                    <p className="text-xs text-purple-600 mt-1">
-                      {formatarPorcentagem(dados.receitaLiquida > 0 ? (dados.ebitda / dados.receitaLiquida) * 100 : 0)} margem
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-orange-500/10 to-orange-600/5 border-orange-500/20">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium text-muted-foreground">Saldo Caixa</p>
-                      <Wallet className="h-4 w-4 text-orange-500" />
-                    </div>
-                    <p className="text-2xl font-bold">{formatarMoeda(dados.saldoFinal)}</p>
-                    <p className="text-xs text-orange-600 mt-1">
-                      {dados.saldoFinal > dados.saldoInicial ? '+' : ''}
-                      {formatarMoeda(dados.saldoFinal - dados.saldoInicial)} vs inicial
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Gráfico de Margens */}
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Evolução de Margens</h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <ComposedChart data={margemData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="nome" stroke="#9ca3af" />
-                    <YAxis yAxisId="left" stroke="#9ca3af" tickFormatter={(v) => formatarMoeda(v)} />
-                    <YAxis yAxisId="right" orientation="right" stroke="#9ca3af" tickFormatter={(v) => `${v}%`} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }}
-                      formatter={(value: any, name: string) => {
-                        if (name === 'margem') return [formatarPorcentagem(value), 'Margem %'];
-                        return [formatarMoeda(value), 'Valor'];
-                      }}
-                    />
-                    <Legend />
-                    <Bar yAxisId="left" dataKey="valor" fill={COLORS.primary} name="Valor" />
-                    <Line yAxisId="right" type="monotone" dataKey="margem" stroke={COLORS.warning} strokeWidth={2} name="Margem %" />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Alertas e Observações */}
-              <div className="space-y-3">
-                <h3 className="text-lg font-semibold">Destaques do Período</h3>
-                
-                {dados.desvioReceita > 5 && (
-                  <Alert className="border-green-500/50 bg-green-500/10">
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                    <AlertDescription>
-                      <strong>Receita acima do orçado:</strong> Superou a meta em {formatarPorcentagem(dados.desvioReceita)}, 
-                      equivalente a {formatarMoeda(dados.receitaBruta - dados.orcadoReceita)}.
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {dados.percentualInadimplencia > 10 && (
-                  <Alert className="border-yellow-500/50 bg-yellow-500/10">
-                    <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                    <AlertDescription>
-                      <strong>Atenção à inadimplência:</strong> {formatarPorcentagem(dados.percentualInadimplencia)} das contas 
-                      a receber estão vencidas ({formatarMoeda(dados.totalVencido)}).
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {dados.margemLiquida < 10 && (
-                  <Alert className="border-red-500/50 bg-red-500/10">
-                    <XCircle className="h-4 w-4 text-red-500" />
-                    <AlertDescription>
-                      <strong>Margem líquida abaixo do ideal:</strong> Margem de {formatarPorcentagem(dados.margemLiquida)} 
-                      está abaixo dos 10% recomendados. Revisar estrutura de custos.
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {cicloFinanceiroData[3].dias > 30 && (
-                  <Alert className="border-orange-500/50 bg-orange-500/10">
-                    <Info className="h-4 w-4 text-orange-500" />
-                    <AlertDescription>
-                      <strong>Ciclo de caixa elevado:</strong> {cicloFinanceiroData[3].dias} dias. 
-                      Considere renegociar prazos com fornecedores ou reduzir PMR.
-                    </AlertDescription>
-                  </Alert>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ===== DRE - DEMONSTRATIVO DE RESULTADOS ===== */}
-        <TabsContent value="dre" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 text-primary" />
-                DRE - Demonstrativo de Resultado do Exercício
-              </CardTitle>
-              <CardDescription>
-                Estrutura detalhada de receitas, custos e lucros
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Tabela DRE */}
-              <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[400px]">Descrição</TableHead>
-                      <TableHead className="text-right">Valor (R$)</TableHead>
-                      <TableHead className="text-right">% Receita Líq.</TableHead>
-                      <TableHead className="text-right">AV (%)</TableHead>
+                      <TableHead>Faixa</TableHead>
+                      <TableHead className="text-right">Valor</TableHead>
+                      <TableHead className="text-right">%</TableHead>
+                      <TableHead className="text-right">Qtd.</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    <TableRow className="font-semibold bg-primary/5">
-                      <TableCell>RECEITA BRUTA</TableCell>
-                      <TableCell className="text-right">{formatarMoeda(dados.receitaBruta)}</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem(dados.receitaLiquida > 0 ? (dados.receitaBruta / dados.receitaLiquida) * 100 : 0)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-                    
-                    <TableRow>
-                      <TableCell className="pl-8">(-) Impostos sobre Vendas</TableCell>
-                      <TableCell className="text-right text-red-400">({formatarMoeda(dados.impostos)})</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.impostos / dados.receitaLiquida) * 100)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow className="font-semibold bg-blue-500/5 border-t-2 border-blue-500/20">
-                      <TableCell>= RECEITA LÍQUIDA</TableCell>
-                      <TableCell className="text-right">{formatarMoeda(dados.receitaLiquida)}</TableCell>
-                      <TableCell className="text-right">100,00%</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow>
-                      <TableCell className="pl-8">(-) Custos Variáveis</TableCell>
-                      <TableCell className="text-right text-red-400">({formatarMoeda(dados.custosVariaveis)})</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.custosVariaveis / dados.receitaLiquida) * 100)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow className="font-semibold bg-green-500/5 border-t-2 border-green-500/20">
-                      <TableCell>= MARGEM DE CONTRIBUIÇÃO</TableCell>
-                      <TableCell className="text-right text-green-400">{formatarMoeda(dados.margemContribuicao)}</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem(dados.margemBruta)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow>
-                      <TableCell className="pl-8">(-) Despesas Fixas</TableCell>
-                      <TableCell className="text-right text-red-400">({formatarMoeda(dados.despesasFixas)})</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.despesasFixas / dados.receitaLiquida) * 100)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow className="font-semibold bg-purple-500/5 border-t-2 border-purple-500/20">
-                      <TableCell>= EBITDA</TableCell>
-                      <TableCell className="text-right text-purple-400">{formatarMoeda(dados.ebitda)}</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.ebitda / dados.receitaLiquida) * 100)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow>
-                      <TableCell className="pl-8">(-) Depreciação/Amortização</TableCell>
-                      <TableCell className="text-right text-red-400">({formatarMoeda(dados.depreciacaoAmortizacao)})</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.depreciacaoAmortizacao / dados.receitaLiquida) * 100)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow className="font-semibold bg-indigo-500/5 border-t-2 border-indigo-500/20">
-                      <TableCell>= EBIT (Resultado Operacional)</TableCell>
-                      <TableCell className="text-right">{formatarMoeda(dados.ebit)}</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.ebit / dados.receitaLiquida) * 100)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow>
-                      <TableCell className="pl-8">(+) Receitas Financeiras</TableCell>
-                      <TableCell className="text-right text-green-400">{formatarMoeda(dados.receitasFinanceiras)}</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.receitasFinanceiras / dados.receitaLiquida) * 100)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow>
-                      <TableCell className="pl-8">(-) Despesas Financeiras</TableCell>
-                      <TableCell className="text-right text-red-400">({formatarMoeda(dados.despesasFinanceiras)})</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.despesasFinanceiras / dados.receitaLiquida) * 100)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow className="font-semibold bg-orange-500/5 border-t-2 border-orange-500/20">
-                      <TableCell>= LAIR (Lucro Antes IR)</TableCell>
-                      <TableCell className="text-right">{formatarMoeda(dados.lair)}</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.lair / dados.receitaLiquida) * 100)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow>
-                      <TableCell className="pl-8">(-) Imposto de Renda/CSLL</TableCell>
-                      <TableCell className="text-right text-red-400">({formatarMoeda(dados.impostoRenda)})</TableCell>
-                      <TableCell className="text-right">{formatarPorcentagem((dados.impostoRenda / dados.receitaLiquida) * 100)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
-
-                    <TableRow className="font-bold bg-primary/10 border-t-4 border-primary/30">
-                      <TableCell className="text-lg">= LUCRO LÍQUIDO</TableCell>
-                      <TableCell className="text-right text-lg text-primary">{formatarMoeda(dados.lucroLiquido)}</TableCell>
-                      <TableCell className="text-right text-lg">{formatarPorcentagem(dados.margemLiquida)}</TableCell>
-                      <TableCell className="text-right">-</TableCell>
-                    </TableRow>
+                    {relatorio.agingData.map((a) => (
+                      <TableRow key={a.periodo}>
+                        <TableCell>{a.periodo}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatarMoeda(a.valor)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatarPorcentagem(a.percentual)}
+                        </TableCell>
+                        <TableCell className="text-right">{a.quantidade}</TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
-              </div>
+              </section>
+            )}
 
-              {/* Gráfico Cascata DRE */}
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Cascata de Resultados</h3>
-                <ResponsiveContainer width="100%" height={350}>
-                  <BarChart data={dreData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="nome" stroke="#9ca3af" />
-                    <YAxis stroke="#9ca3af" tickFormatter={(v) => formatarMoeda(v)} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }}
-                      formatter={(value: any) => formatarMoeda(Math.abs(value))}
-                    />
-                    <Bar dataKey="valor" fill={COLORS.primary}>
-                      {dreData.map((entry, index) => (
-                        <Cell key={`dre-${entry.nome}-${index}`} fill={entry.valor >= 0 ? COLORS.success : COLORS.danger} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+            {/* Notas */}
+            {relatorio.notas.length > 0 && (
+              <section className="border-t pt-4">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                  Notas explicativas
+                </h2>
+                <ol className="list-decimal list-inside space-y-1 text-xs text-slate-600">
+                  {relatorio.notas.map((n) => (
+                    <li key={n}>{n}</li>
+                  ))}
+                </ol>
+              </section>
+            )}
+          </div>
 
-              {/* Insights DRE */}
-              <Alert className="border-blue-500/50 bg-blue-500/10">
-                <Info className="h-4 w-4 text-blue-500" />
-                <AlertDescription>
-                  <strong>Análise Vertical:</strong> A Margem de Contribuição de {formatarPorcentagem(dados.margemBruta)} 
-                  indica que a cada R$ 100 em vendas, R$ {formatarNumero(dados.margemBruta, 2)} cobrem as despesas fixas e geram lucro. 
-                  A margem líquida de {formatarPorcentagem(dados.margemLiquida)} está {dados.margemLiquida >= 15 ? 'saudável' : 'abaixo do ideal de 15%'}.
-                </AlertDescription>
-              </Alert>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ===== FLUXO DE CAIXA ===== */}
-        <TabsContent value="fluxo-caixa" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUpDown className="h-5 w-5 text-primary" />
-                Fluxo de Caixa - Regime de Caixa
-              </CardTitle>
-              <CardDescription>
-                Movimentações financeiras efetivas do período
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Cards de Resumo */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
-                  <CardContent className="pt-6">
-                    <p className="text-sm font-medium text-muted-foreground mb-2">Saldo Inicial</p>
-                    <p className="text-2xl font-bold">{formatarMoeda(dados.saldoInicial)}</p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-500/20">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-2 mb-2">
-                      <ArrowUpRight className="h-4 w-4 text-green-500" />
-                      <p className="text-sm font-medium text-muted-foreground">Entradas</p>
-                    </div>
-                    <p className="text-2xl font-bold text-green-500">{formatarMoeda(dados.entradas)}</p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/20">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-2 mb-2">
-                      <ArrowDownRight className="h-4 w-4 text-red-500" />
-                      <p className="text-sm font-medium text-muted-foreground">Saídas</p>
-                    </div>
-                    <p className="text-2xl font-bold text-red-500">{formatarMoeda(dados.saidas)}</p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border-purple-500/20">
-                  <CardContent className="pt-6">
-                    <p className="text-sm font-medium text-muted-foreground mb-2">Saldo Final</p>
-                    <p className="text-2xl font-bold text-purple-400">{formatarMoeda(dados.saldoFinal)}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {dados.saldoFinal > dados.saldoInicial ? 'Variação positiva' : 'Variação negativa'}
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Gráfico de Fluxo */}
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Movimentação de Caixa</h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={fluxoCaixaData}>
-                    <defs>
-                      <linearGradient id="colorCaixa" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={COLORS.primary} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={COLORS.primary} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="nome" stroke="#9ca3af" />
-                    <YAxis stroke="#9ca3af" tickFormatter={(v) => formatarMoeda(v)} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }}
-                      formatter={(value: any) => formatarMoeda(value)}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="valor"
-                      stroke={COLORS.primary}
-                      fillOpacity={1}
-                      fill="url(#colorCaixa)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Burn Rate */}
-              <Card className="border-orange-500/20 bg-orange-500/5">
-                <CardContent className="pt-6">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <Zap className="h-5 w-5 text-orange-500" />
-                        <h3 className="text-lg font-semibold">Burn Rate (Taxa de Queima)</h3>
-                      </div>
-                      <p className="text-3xl font-bold text-orange-400 mb-2">
-                        {formatarMoeda(dados.burnRate)}/mês
-                      </p>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        Taxa média de queima de caixa mensal (despesas operacionais)
-                      </p>
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <ChevronRight className="h-4 w-4 text-orange-500" />
-                          <p className="text-sm">
-                            <strong>Runway (Pista):</strong>{' '}
-                            {dados.burnRate > 0
-                              ? `${formatarNumero(dados.saldoFinal / dados.burnRate, 1)} meses de operação`
-                              : 'N/A'}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <ChevronRight className="h-4 w-4 text-orange-500" />
-                          <p className="text-sm">
-                            <strong>Fluxo Líquido:</strong> {formatarMoeda(dados.entradas - dados.saidas)} no período
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    <Badge variant={dados.saldoFinal > dados.saldoInicial ? 'default' : 'destructive'} className="text-sm">
-                      {dados.saldoFinal > dados.saldoInicial ? 'Positivo' : 'Negativo'}
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Análise de Liquidez */}
-              <Alert className="border-blue-500/50 bg-blue-500/10">
-                <Info className="h-4 w-4 text-blue-500" />
-                <AlertDescription>
-                  <strong>Análise de Liquidez:</strong> Com saldo final de {formatarMoeda(dados.saldoFinal)} e burn rate 
-                  de {formatarMoeda(dados.burnRate)}, a empresa possui capacidade de operar por aproximadamente{' '}
-                  <strong>
-                    {dados.burnRate > 0
-                      ? `${formatarNumero(dados.saldoFinal / dados.burnRate, 1)} meses`
-                      : 'N/A'}
-                  </strong>{' '}
-                  sem novas receitas. 
-                  {dados.burnRate > 0 && dados.saldoFinal / dados.burnRate < 3 && ' Atenção: Runway crítico! Considere captação ou redução de custos.'}
-                </AlertDescription>
-              </Alert>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ===== KPIs ===== */}
-        <TabsContent value="kpis" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Target className="h-5 w-5 text-primary" />
-                Indicadores de Desempenho (KPIs)
-              </CardTitle>
-              <CardDescription>
-                Principais métricas financeiras com fórmulas e interpretações
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Grid de KPIs */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* EBITDA */}
-                <Card className="border-purple-500/20 bg-purple-500/5">
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center justify-between">
-                      <span>EBITDA</span>
-                      <Badge variant="outline" className="text-purple-400 border-purple-400">
-                        {formatarMoeda(dados.ebitda)}
-                      </Badge>
-                    </CardTitle>
-                    <CardDescription>
-                      Earnings Before Interest, Taxes, Depreciation and Amortization
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-purple-400">Fórmula:</p>
-                      <code className="block p-3 bg-background/50 rounded text-xs">
-                        EBITDA = Lucro Operacional + Depreciação + Amortização
-                        <br />
-                        EBITDA = {formatarMoeda(dados.ebit)} + {formatarMoeda(dados.depreciacaoAmortizacao)}
-                        <br />
-                        EBITDA = {formatarMoeda(dados.ebitda)}
-                      </code>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-purple-400">Interpretação:</p>
-                      <p className="text-sm text-muted-foreground">
-                        Mede a capacidade operacional de geração de caixa, desconsiderando efeitos financeiros e 
-                        tributários. Margem EBITDA de <strong>{formatarPorcentagem((dados.ebitda / dados.receitaLiquida) * 100)}</strong> indica 
-                        {(dados.ebitda / dados.receitaLiquida) * 100 > 20 ? ' excelente ' : ' adequada '}
-                        geração de caixa operacional.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 p-3 bg-purple-500/10 rounded">
-                      <CheckCircle className="h-4 w-4 text-purple-400" />
-                      <p className="text-xs">
-                        Ideal: {'>'}20% da receita líquida | Atual: {formatarPorcentagem((dados.ebitda / dados.receitaLiquida) * 100)}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* ROI */}
-                <Card className="border-green-500/20 bg-green-500/5">
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center justify-between">
-                      <span>ROI - Retorno sobre Investimento</span>
-                      <Badge variant="outline" className="text-green-400 border-green-400">
-                        {formatarPorcentagem(dados.roi)}
-                      </Badge>
-                    </CardTitle>
-                    <CardDescription>
-                      Return on Investment
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-green-400">Fórmula:</p>
-                      <code className="block p-3 bg-background/50 rounded text-xs">
-                        ROI = (Lucro Líquido / Investimento Total) × 100
-                        <br />
-                        ROI = ({formatarMoeda(dados.lucroLiquido)} / {formatarMoeda(dados.receitaLiquida / 2)}) × 100
-                        <br />
-                        ROI = {formatarPorcentagem(dados.roi)}
-                      </code>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-green-400">Interpretação:</p>
-                      <p className="text-sm text-muted-foreground">
-                        Mede a eficiência do capital investido. Um ROI de <strong>{formatarPorcentagem(dados.roi)}</strong> significa 
-                        que a cada R$ 100 investidos, há retorno de R$ {formatarNumero(dados.roi, 2)}. 
-                        {dados.roi > 30 && ' Excelente retorno!'}
-                        {dados.roi >= 15 && dados.roi <= 30 && ' Retorno adequado.'}
-                        {dados.roi < 15 && ' Retorno abaixo do esperado.'}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 p-3 bg-green-500/10 rounded">
-                      <CheckCircle className="h-4 w-4 text-green-400" />
-                      <p className="text-xs">
-                        Ideal: {'>'}25% ao ano | Atual: {formatarPorcentagem(dados.roi)} ao mês
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Ponto de Equilíbrio */}
-                <Card className="border-blue-500/20 bg-blue-500/5">
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center justify-between">
-                      <span>Ponto de Equilíbrio (Break-even)</span>
-                      <Badge variant="outline" className="text-blue-400 border-blue-400">
-                        {formatarMoeda(dados.pontoEquilibrio)}
-                      </Badge>
-                    </CardTitle>
-                    <CardDescription>
-                      Receita necessária para cobrir todos os custos
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-blue-400">Fórmula:</p>
-                      <code className="block p-3 bg-background/50 rounded text-xs">
-                        PE = Despesas Fixas / (Margem de Contribuição %)
-                        <br />
-                        PE = {formatarMoeda(dados.despesasFixas)} / {formatarPorcentagem(dados.margemBruta / 100)}
-                        <br />
-                        PE = {formatarMoeda(dados.pontoEquilibrio)}
-                      </code>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-blue-400">Interpretação:</p>
-                      <p className="text-sm text-muted-foreground">
-                        É necessário faturar <strong>{formatarMoeda(dados.pontoEquilibrio)}</strong> para não ter 
-                        prejuízo nem lucro. Atualmente faturando {formatarMoeda(dados.receitaLiquida)}, está{' '}
-                        <strong>{formatarPorcentagem(((dados.receitaLiquida - dados.pontoEquilibrio) / dados.pontoEquilibrio) * 100)}</strong> acima 
-                        do ponto de equilíbrio.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 p-3 bg-blue-500/10 rounded">
-                      {dados.receitaLiquida > dados.pontoEquilibrio ? (
-                        <>
-                          <CheckCircle className="h-4 w-4 text-blue-400" />
-                          <p className="text-xs">
-                            Margem de Segurança: {formatarMoeda(dados.receitaLiquida - dados.pontoEquilibrio)}
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <AlertTriangle className="h-4 w-4 text-yellow-400" />
-                          <p className="text-xs">Abaixo do ponto de equilíbrio!</p>
-                        </>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Ciclo de Caixa Financeiro */}
-                <Card className="border-orange-500/20 bg-orange-500/5">
-                  <CardHeader>
-                    <CardTitle className="text-lg flex items-center justify-between">
-                      <span>Ciclo de Caixa Financeiro</span>
-                      <Badge variant="outline" className="text-orange-400 border-orange-400">
-                        {cicloFinanceiroData[3].dias} dias
-                      </Badge>
-                    </CardTitle>
-                    <CardDescription>
-                      Tempo entre pagamento a fornecedores e recebimento de clientes
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-3">
-                      {cicloFinanceiroData.map((item) => (
-                        <div key={item.indicador} className="flex items-center justify-between p-3 bg-background/50 rounded">
-                          <div className="flex items-center gap-2">
-                            <Clock className="h-4 w-4 text-orange-400" />
-                            <div>
-                              <p className="text-sm font-semibold">{item.indicador}</p>
-                              <p className="text-xs text-muted-foreground">{item.descricao}</p>
-                            </div>
-                          </div>
-                          <Badge variant="outline" className="text-orange-400">
-                            {item.dias} dias
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-orange-400">Fórmula:</p>
-                      <code className="block p-3 bg-background/50 rounded text-xs">
-                        CCF = PMR + PME - PMP
-                        <br />
-                        CCF = {dados.pmr} + {dados.pme} - {dados.pmp}
-                        <br />
-                        CCF = {cicloFinanceiroData[3].dias} dias
-                      </code>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-orange-400">Interpretação:</p>
-                      <p className="text-sm text-muted-foreground">
-                        A empresa leva <strong>{cicloFinanceiroData[3].dias} dias</strong> para converter seus 
-                        investimentos em caixa. 
-                        {cicloFinanceiroData[3].dias < 15 && ' Ciclo muito bom!'}
-                        {cicloFinanceiroData[3].dias >= 15 && cicloFinanceiroData[3].dias <= 30 && ' Ciclo adequado.'}
-                        {cicloFinanceiroData[3].dias > 30 && ' Ciclo elevado - considere otimizar prazos.'}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Comparativo Orçado vs Realizado */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Comparativo: Orçado vs Realizado</CardTitle>
-                  <CardDescription>
-                    Análise de variação entre planejado e executado
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto mb-6">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Categoria</TableHead>
-                          <TableHead className="text-right">Orçado</TableHead>
-                          <TableHead className="text-right">Realizado</TableHead>
-                          <TableHead className="text-right">Variação (R$)</TableHead>
-                          <TableHead className="text-right">Variação (%)</TableHead>
-                          <TableHead className="text-center">Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {comparativoData.map((item) => {
-                          const variacao = item.realizado - item.orcado;
-                          const isReceita = item.categoria === 'Receitas';
-                          const isPositivo = isReceita ? variacao > 0 : variacao < 0;
-                          
-                          return (
-                            <TableRow key={item.categoria}>
-                              <TableCell className="font-medium">{item.categoria}</TableCell>
-                              <TableCell className="text-right">{formatarMoeda(item.orcado)}</TableCell>
-                              <TableCell className="text-right">{formatarMoeda(item.realizado)}</TableCell>
-                              <TableCell className={`text-right ${isPositivo ? 'text-green-400' : 'text-red-400'}`}>
-                                {variacao > 0 ? '+' : ''}{formatarMoeda(variacao)}
-                              </TableCell>
-                              <TableCell className={`text-right ${isPositivo ? 'text-green-400' : 'text-red-400'}`}>
-                                {item.desvio > 0 ? '+' : ''}{formatarPorcentagem(Math.abs(item.desvio))}
-                              </TableCell>
-                              <TableCell className="text-center">
-                                {isPositivo ? (
-                                  <Badge className="bg-green-500/20 text-green-400 border-green-500/30">
-                                    <TrendingUp className="h-3 w-3 mr-1" />
-                                    Positivo
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="destructive" className="bg-red-500/20 text-red-400 border-red-500/30">
-                                    <TrendingDown className="h-3 w-3 mr-1" />
-                                    Negativo
-                                  </Badge>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={comparativoData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis dataKey="categoria" stroke="#9ca3af" />
-                      <YAxis stroke="#9ca3af" tickFormatter={(v) => formatarMoeda(v)} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }}
-                        formatter={(value: any) => formatarMoeda(value)}
-                      />
-                      <Legend />
-                      <Bar dataKey="orcado" fill={COLORS.info} name="Orçado" />
-                      <Bar dataKey="realizado" fill={COLORS.primary} name="Realizado" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ===== GASTOS POR FORNECEDOR ===== */}
-        <TabsContent value="fornecedores" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <DollarSign className="h-5 w-5 text-primary" />
-                Gastos por Fornecedor
-              </CardTitle>
-              <CardDescription>
-                Análise de despesas por fornecedor no período selecionado
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Resumo de Gastos */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium text-muted-foreground">Total de Gastos</p>
-                      <DollarSign className="h-4 w-4 text-blue-500" />
-                    </div>
-                    <p className="text-2xl font-bold">
-                      {formatarMoeda(gastosPorFornecedor.reduce((sum, f) => sum + f.total, 0))}
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border-purple-500/20">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium text-muted-foreground">Fornecedores Ativos</p>
-                      <Activity className="h-4 w-4 text-purple-500" />
-                    </div>
-                    <p className="text-2xl font-bold">{gastosPorFornecedor.length}</p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-orange-500/10 to-orange-600/5 border-orange-500/20">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-sm font-medium text-muted-foreground">Gasto Médio</p>
-                      <BarChart3 className="h-4 w-4 text-orange-500" />
-                    </div>
-                    <p className="text-2xl font-bold">
-                      {formatarMoeda(gastosPorFornecedor.length > 0 
-                        ? gastosPorFornecedor.reduce((sum, f) => sum + f.total, 0) / gastosPorFornecedor.length 
-                        : 0)}
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Tabela de Fornecedores */}
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Detalhamento por Fornecedor</h3>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[50px]">#</TableHead>
-                        <TableHead>Fornecedor</TableHead>
-                        <TableHead className="text-right">Total Gasto</TableHead>
-                        <TableHead className="text-right">Quantidade</TableHead>
-                        <TableHead className="text-right">Ticket Médio</TableHead>
-                        <TableHead className="text-right">% do Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {gastosPorFornecedor.length > 0 ? (
-                        gastosPorFornecedor.map((fornecedor, index) => (
-                          <TableRow key={index}>
-                            <TableCell className="font-medium">{index + 1}</TableCell>
-                            <TableCell className="font-medium">{fornecedor.nome}</TableCell>
-                            <TableCell className="text-right font-semibold text-red-400">
-                              {formatarMoeda(fornecedor.total)}
-                            </TableCell>
-                            <TableCell className="text-right">{fornecedor.quantidade}</TableCell>
-                            <TableCell className="text-right">
-                              {formatarMoeda(fornecedor.total / fornecedor.quantidade)}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Badge variant="outline" className={
-                                fornecedor.percentual > 30 
-                                  ? 'bg-red-500/20 text-red-400 border-red-500/30' 
-                                  : fornecedor.percentual > 15 
-                                  ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                                  : 'bg-green-500/20 text-green-400 border-green-500/30'
-                              }>
-                                {formatarPorcentagem(fornecedor.percentual)}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                            Nenhum gasto com fornecedor encontrado no período
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-
-              {/* Gráfico de Pizza */}
-              {gastosPorFornecedor.length > 0 && (
-                <div>
-                  <h3 className="text-lg font-semibold mb-4">Distribuição de Gastos</h3>
-                  <ResponsiveContainer width="100%" height={350}>
-                    <PieChart>
-                      <Pie
-                        data={gastosPorFornecedor.slice(0, 10)}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ nome, percentual }) => `${nome}: ${formatarPorcentagem(percentual)}`}
-                        outerRadius={120}
-                        fill="#8884d8"
-                        dataKey="total"
-                      >
-                        {gastosPorFornecedor.slice(0, 10).map((entry, index) => (
-                          <Cell key={`fornecedor-${entry.nome}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }}
-                        formatter={(value: any) => formatarMoeda(value)}
-                      />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-
-              {/* Alertas */}
-              {gastosPorFornecedor.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-lg font-semibold">Análise de Concentração</h3>
-                  
-                  {gastosPorFornecedor[0]?.percentual > 40 && (
-                    <Alert className="border-red-500/50 bg-red-500/10">
-                      <AlertTriangle className="h-4 w-4 text-red-500" />
-                      <AlertDescription>
-                        <strong>Alta Concentração de Gastos:</strong> O fornecedor "{gastosPorFornecedor[0].nome}" 
-                        representa {formatarPorcentagem(gastosPorFornecedor[0].percentual)} dos gastos totais 
-                        ({formatarMoeda(gastosPorFornecedor[0].total)}). Considere diversificar para reduzir riscos.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {gastosPorFornecedor.slice(0, 3).reduce((sum, f) => sum + f.percentual, 0) > 70 && (
-                    <Alert className="border-yellow-500/50 bg-yellow-500/10">
-                      <AlertCircle className="h-4 w-4 text-yellow-500" />
-                      <AlertDescription>
-                        <strong>Concentração nos Top 3:</strong> Os três principais fornecedores representam {' '}
-                        {formatarPorcentagem(gastosPorFornecedor.slice(0, 3).reduce((sum, f) => sum + f.percentual, 0))} 
-                        dos gastos. Avalie oportunidades de negociação e melhores condições.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  <Alert className="border-blue-500/50 bg-blue-500/10">
-                    <Info className="h-4 w-4 text-blue-500" />
-                    <AlertDescription>
-                      <strong>Dica:</strong> Revise os contratos com os principais fornecedores mensalmente. 
-                      Negocie prazos de pagamento maiores e busque descontos por volume ou antecipação.
-                    </AlertDescription>
-                  </Alert>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ===== INADIMPLÊNCIA ===== */}
-        <TabsContent value="inadimplencia" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CreditCard className="h-5 w-5 text-primary" />
-                Análise de Inadimplência
-              </CardTitle>
-              <CardDescription>
-                Envelhecimento de dívidas (Aging) e impacto no provisionamento
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Resumo de Inadimplência */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-500/20">
-                  <CardContent className="pt-6">
-                    <p className="text-sm font-medium text-muted-foreground mb-2">Total a Receber</p>
-                    <p className="text-2xl font-bold">{formatarMoeda(dados.totalReceber)}</p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-yellow-500/10 to-yellow-600/5 border-yellow-500/20">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-2 mb-2">
-                      <AlertTriangle className="h-4 w-4 text-yellow-500" />
-                      <p className="text-sm font-medium text-muted-foreground">Total Vencido</p>
-                    </div>
-                    <p className="text-2xl font-bold text-yellow-500">{formatarMoeda(dados.totalVencido)}</p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-500/20">
-                  <CardContent className="pt-6">
-                    <p className="text-sm font-medium text-muted-foreground mb-2">% Inadimplência</p>
-                    <p className="text-2xl font-bold text-red-500">{formatarPorcentagem(dados.percentualInadimplencia)}</p>
-                  </CardContent>
-                </Card>
-
-                <Card className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border-purple-500/20">
-                  <CardContent className="pt-6">
-                    <p className="text-sm font-medium text-muted-foreground mb-2">Provisão (PECLD)</p>
-                    <p className="text-2xl font-bold text-purple-400">{formatarMoeda(dados.provisaoDevedoresDuvidosos)}</p>
-                    <p className="text-xs text-muted-foreground mt-1">30% do vencido</p>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Tabela de Aging */}
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Aging - Envelhecimento de Contas a Receber</h3>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Período de Vencimento</TableHead>
-                        <TableHead className="text-right">Valor (R$)</TableHead>
-                        <TableHead className="text-right">% do Total</TableHead>
-                        <TableHead className="text-right">Qtd. Títulos</TableHead>
-                        <TableHead className="text-center">Risco</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {agingData.map((item) => {
-                        let risco = 'Baixo';
-                        let corRisco = 'default';
-                        
-                        if (item.periodo.includes('31-60')) {
-                          risco = 'Médio';
-                          corRisco = 'warning';
-                        } else if (item.periodo.includes('61-90')) {
-                          risco = 'Alto';
-                          corRisco = 'destructive';
-                        } else if (item.periodo.includes('> 90')) {
-                          risco = 'Crítico';
-                          corRisco = 'destructive';
-                        }
-                        
-                        return (
-                          <TableRow key={item.periodo}>
-                            <TableCell className="font-medium">{item.periodo}</TableCell>
-                            <TableCell className="text-right">{formatarMoeda(item.valor)}</TableCell>
-                            <TableCell className="text-right">{formatarPorcentagem(item.percentual)}</TableCell>
-                            <TableCell className="text-right">{item.quantidade}</TableCell>
-                            <TableCell className="text-center">
-                              <Badge variant={corRisco as any}>{risco}</Badge>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                      <TableRow className="font-semibold bg-primary/5 border-t-2">
-                        <TableCell>TOTAL</TableCell>
-                        <TableCell className="text-right">{formatarMoeda(dados.totalReceber)}</TableCell>
-                        <TableCell className="text-right">100%</TableCell>
-                        <TableCell className="text-right">{agingData.reduce((sum, item) => sum + item.quantidade, 0)}</TableCell>
-                        <TableCell></TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-
-              {/* Gráfico de Aging */}
-              <div>
-                <h3 className="text-lg font-semibold mb-4">Distribuição por Período de Vencimento</h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={agingData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={(entry) => `${entry.periodo}: ${formatarPorcentagem(entry.percentual)}`}
-                      outerRadius={100}
-                      fill="#8884d8"
-                      dataKey="valor"
-                    >
-                      {agingData.map((entry, index) => (
-                        <Cell key={`aging-${entry.periodo}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }}
-                      formatter={(value: any) => formatarMoeda(value)}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* PECLD - Provisão para Créditos de Liquidação Duvidosa */}
-              <Card className="border-yellow-500/20 bg-yellow-500/5">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <AlertCircle className="h-5 w-5 text-yellow-500" />
-                    PECLD - Provisão para Créditos de Liquidação Duvidosa
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    Provisão contábil para cobrir possíveis perdas com inadimplência, calculada com base no histórico 
-                    de recebimento e risco de cada faixa de vencimento.
-                  </p>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="p-4 bg-background/50 rounded space-y-2">
-                      <p className="text-sm font-semibold text-yellow-400">Critério de Provisão:</p>
-                      <ul className="text-sm text-muted-foreground space-y-1">
-                        <li>• A vencer: 0% de provisão</li>
-                        <li>• 1-30 dias: 10% de provisão</li>
-                        <li>• 31-60 dias: 25% de provisão</li>
-                        <li>• 61-90 dias: 50% de provisão</li>
-                        <li>• {'>'} 90 dias: 100% de provisão</li>
-                      </ul>
-                    </div>
-                    
-                    <div className="p-4 bg-background/50 rounded space-y-2">
-                      <p className="text-sm font-semibold text-yellow-400">Impacto Contábil:</p>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Total Vencido:</span>
-                          <span className="font-semibold">{formatarMoeda(dados.totalVencido)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Provisão (30%):</span>
-                          <span className="font-semibold text-yellow-400">
-                            ({formatarMoeda(dados.provisaoDevedoresDuvidosos)})
-                          </span>
-                        </div>
-                        <div className="flex justify-between border-t border-border pt-2">
-                          <span className="text-muted-foreground">Valor Líquido:</span>
-                          <span className="font-bold">
-                            {formatarMoeda(dados.totalReceber - dados.provisaoDevedoresDuvidosos)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Recomendações */}
-              <Alert className={dados.percentualInadimplencia > 10 ? 'border-red-500/50 bg-red-500/10' : 'border-green-500/50 bg-green-500/10'}>
-                <Info className={`h-4 w-4 ${dados.percentualInadimplencia > 10 ? 'text-red-500' : 'text-green-500'}`} />
-                <AlertDescription>
-                  <strong>Análise:</strong> Inadimplência de {formatarPorcentagem(dados.percentualInadimplencia)} 
-                  {dados.percentualInadimplencia <= 5 && ' está dentro do padrão aceitável (até 5%).'}
-                  {dados.percentualInadimplencia > 5 && dados.percentualInadimplencia <= 10 && ' está no limite aceitável. Monitorar de perto.'}
-                  {dados.percentualInadimplencia > 10 && ' está acima do aceitável! Ações urgentes necessárias:'}
-                  
-                  {dados.percentualInadimplencia > 10 && (
-                    <ul className="mt-2 ml-4 space-y-1">
-                      <li>• Revisar política de crédito</li>
-                      <li>• Intensificar cobrança</li>
-                      <li>• Oferecer descontos para quitação</li>
-                      <li>• Renegociar prazos com devedores</li>
-                    </ul>
-                  )}
-                </AlertDescription>
-              </Alert>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ===== CONCLUSÃO E RECOMENDAÇÕES ===== */}
-        <TabsContent value="conclusao" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CheckCircle className="h-5 w-5 text-primary" />
-                Conclusão e Recomendações Estratégicas
-              </CardTitle>
-              <CardDescription>
-                Sugestões baseadas na análise completa dos indicadores
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Pontos Fortes */}
-              <div>
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 text-green-400">
-                  <CheckCircle className="h-5 w-5" />
-                  Pontos Fortes
-                </h3>
-                <div className="space-y-3">
-                  {dados.desvioReceita > 5 && (
-                    <div className="p-4 bg-green-500/10 border border-green-500/20 rounded">
-                      <p className="font-semibold text-green-400 mb-1">✓ Superação de Meta de Receita</p>
-                      <p className="text-sm text-muted-foreground">
-                        Receita {formatarPorcentagem(dados.desvioReceita)} acima do orçado, demonstrando forte 
-                        desempenho comercial e capacidade de geração de receita.
-                      </p>
-                    </div>
-                  )}
-                  
-                  {dados.margemBruta > 50 && (
-                    <div className="p-4 bg-green-500/10 border border-green-500/20 rounded">
-                      <p className="font-semibold text-green-400 mb-1">✓ Margem de Contribuição Saudável</p>
-                      <p className="text-sm text-muted-foreground">
-                        Margem de {formatarPorcentagem(dados.margemBruta)} indica boa precificação e controle 
-                        de custos variáveis, garantindo capacidade de cobrir despesas fixas.
-                      </p>
-                    </div>
-                  )}
-                  
-                  {dados.saldoFinal > dados.saldoInicial && (
-                    <div className="p-4 bg-green-500/10 border border-green-500/20 rounded">
-                      <p className="font-semibold text-green-400 mb-1">✓ Geração Positiva de Caixa</p>
-                      <p className="text-sm text-muted-foreground">
-                        Aumento de {formatarMoeda(dados.saldoFinal - dados.saldoInicial)} no caixa, demonstrando 
-                        capacidade de gerar recursos operacionais.
-                      </p>
-                    </div>
-                  )}
-                  
-                  {(dados.ebitda / dados.receitaLiquida) * 100 > 20 && (
-                    <div className="p-4 bg-green-500/10 border border-green-500/20 rounded">
-                      <p className="font-semibold text-green-400 mb-1">✓ EBITDA Robusto</p>
-                      <p className="text-sm text-muted-foreground">
-                        Margem EBITDA de {formatarPorcentagem((dados.ebitda / dados.receitaLiquida) * 100)} demonstra 
-                        excelente geração operacional de caixa antes de efeitos financeiros e tributários.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Pontos de Atenção */}
-              <div>
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 text-yellow-400">
-                  <AlertTriangle className="h-5 w-5" />
-                  Pontos de Atenção
-                </h3>
-                <div className="space-y-3">
-                  {dados.percentualInadimplencia > 10 && (
-                    <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded">
-                      <p className="font-semibold text-yellow-400 mb-1">⚠ Inadimplência Elevada</p>
-                      <p className="text-sm text-muted-foreground mb-2">
-                        Taxa de {formatarPorcentagem(dados.percentualInadimplencia)} acima do ideal (5-10%). 
-                        Impacta fluxo de caixa e exige provisão de {formatarMoeda(dados.provisaoDevedoresDuvidosos)}.
-                      </p>
-                      <p className="text-sm font-semibold text-yellow-400">Ações Recomendadas:</p>
-                      <ul className="text-sm text-muted-foreground ml-4 mt-1 space-y-1">
-                        <li>• Implementar sistema de credit scoring</li>
-                        <li>• Reduzir prazos de pagamento ou oferecer desconto para à vista</li>
-                        <li>• Intensificar follow-up de cobranças</li>
-                      </ul>
-                    </div>
-                  )}
-                  
-                  {cicloFinanceiroData[3].dias > 30 && (
-                    <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded">
-                      <p className="font-semibold text-yellow-400 mb-1">⚠ Ciclo de Caixa Longo</p>
-                      <p className="text-sm text-muted-foreground mb-2">
-                        Ciclo de {cicloFinanceiroData[3].dias} dias indica tempo elevado entre desembolso e recebimento.
-                      </p>
-                      <p className="text-sm font-semibold text-yellow-400">Ações Recomendadas:</p>
-                      <ul className="text-sm text-muted-foreground ml-4 mt-1 space-y-1">
-                        <li>• Negociar aumento do PMP com fornecedores (atual: {dados.pmp} dias)</li>
-                        <li>• Reduzir PMR oferecendo descontos para antecipação (atual: {dados.pmr} dias)</li>
-                        <li>• Otimizar giro de estoque (atual PME: {dados.pme} dias)</li>
-                      </ul>
-                    </div>
-                  )}
-                  
-                  {dados.margemLiquida < 15 && (
-                    <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded">
-                      <p className="font-semibold text-yellow-400 mb-1">⚠ Margem Líquida Abaixo do Ideal</p>
-                      <p className="text-sm text-muted-foreground mb-2">
-                        Margem de {formatarPorcentagem(dados.margemLiquida)} está abaixo dos 15% recomendados.
-                      </p>
-                      <p className="text-sm font-semibold text-yellow-400">Ações Recomendadas:</p>
-                      <ul className="text-sm text-muted-foreground ml-4 mt-1 space-y-1">
-                        <li>• Revisar estrutura de custos fixos ({formatarMoeda(dados.despesasFixas)})</li>
-                        <li>• Renegociar despesas financeiras ({formatarMoeda(dados.despesasFinanceiras)})</li>
-                        <li>• Avaliar reajuste de preços de venda</li>
-                      </ul>
-                    </div>
-                  )}
-
-                  {dados.saldoFinal / dados.burnRate < 3 && (
-                    <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded">
-                      <p className="font-semibold text-yellow-400 mb-1">⚠ Runway Crítico</p>
-                      <p className="text-sm text-muted-foreground mb-2">
-                        Com burn rate de {formatarMoeda(dados.burnRate)}/mês, o caixa atual suporta apenas{' '}
-                        {formatarNumero(dados.saldoFinal / dados.burnRate, 1)} meses de operação.
-                      </p>
-                      <p className="text-sm font-semibold text-yellow-400">Ações Urgentes:</p>
-                      <ul className="text-sm text-muted-foreground ml-4 mt-1 space-y-1">
-                        <li>• Acelerar recebimentos (antecipação de recebíveis)</li>
-                        <li>• Renegociar prazos de pagamento</li>
-                        <li>• Avaliar captação de recursos (empréstimo/investimento)</li>
-                        <li>• Reduzir custos não essenciais imediatamente</li>
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Recomendações Estratégicas */}
-              <Card className="border-primary/20 bg-primary/5">
-                <CardHeader>
-                  <CardTitle className="text-lg">Recomendações Estratégicas - Curto Prazo (30-90 dias)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ol className="space-y-3 list-decimal list-inside">
-                    <li className="text-sm">
-                      <strong>Gestão de Inadimplência:</strong> Implementar rotina semanal de cobrança, com oferta 
-                      de desconto de 5-10% para quitação de títulos vencidos há mais de 60 dias.
-                    </li>
-                    <li className="text-sm">
-                      <strong>Otimização de Capital de Giro:</strong> Negociar com fornecedores principais extensão 
-                      de PMP em 15 dias, enquanto oferece 3% de desconto para clientes pagarem em 14 dias (reduzir PMR).
-                    </li>
-                    <li className="text-sm">
-                      <strong>Revisão de Custos Fixos:</strong> Realizar análise detalhada de despesas fixas 
-                      ({formatarMoeda(dados.despesasFixas)}/mês) identificando potencial de redução de 10-15%.
-                    </li>
-                    <li className="text-sm">
-                      <strong>Monitoramento de KPIs:</strong> Estabelecer dashboard executivo com acompanhamento 
-                      semanal de: Margem Bruta, EBITDA, Inadimplência e Saldo de Caixa.
-                    </li>
-                    <li className="text-sm">
-                      <strong>Precificação:</strong> Revisar mix de produtos/serviços focando em itens com maior 
-                      margem de contribuição, buscando elevar margem líquida para 18-20%.
-                    </li>
-                  </ol>
-                </CardContent>
-              </Card>
-
-              {/* Metas Sugeridas */}
-              <Card className="border-blue-500/20 bg-blue-500/5">
-                <CardHeader>
-                  <CardTitle className="text-lg">Metas Recomendadas - Próximo Período</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <h4 className="font-semibold text-blue-400">Metas Financeiras:</h4>
-                      <ul className="space-y-1 text-sm text-muted-foreground">
-                        <li>• Receita Líquida: {formatarMoeda(dados.receitaLiquida * 1.1)} (+10%)</li>
-                        <li>• Margem Líquida: 18% (vs {formatarPorcentagem(dados.margemLiquida)} atual)</li>
-                        <li>• EBITDA: {formatarMoeda(dados.ebitda * 1.15)} (+15%)</li>
-                        <li>• Inadimplência: {'<'}8% (vs {formatarPorcentagem(dados.percentualInadimplencia)} atual)</li>
-                      </ul>
-                    </div>
-                    <div className="space-y-2">
-                      <h4 className="font-semibold text-blue-400">Metas Operacionais:</h4>
-                      <ul className="space-y-1 text-sm text-muted-foreground">
-                        <li>• PMR: 21 dias (vs {dados.pmr} atual) - redução de 25%</li>
-                        <li>• PMP: 42 dias (vs {dados.pmp} atual) - aumento de 20%</li>
-                        <li>• Ciclo de Caixa: {'<'}20 dias (vs {cicloFinanceiroData[3].dias} atual)</li>
-                        <li>• Burn Rate: {'<'}{formatarMoeda(dados.burnRate * 0.9)} - redução de 10%</li>
-                      </ul>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Conclusão Final */}
-              <Alert className="border-primary/50 bg-primary/10">
-                <Info className="h-4 w-4 text-primary" />
-                <AlertDescription>
-                  <strong className="text-lg">Conclusão Geral:</strong>
-                  <p className="mt-2">
-                    A empresa apresenta <strong>saúde financeira {dados.margemLiquida > 15 && dados.percentualInadimplencia < 10 ? 'sólida' : 'moderada'}</strong>, 
-                    com destaque para {dados.desvioReceita > 5 ? 'superação de meta de receita' : 'geração de receita'} 
-                    {dados.margemBruta > 50 && ' e margem de contribuição robusta'}. 
-                    {dados.percentualInadimplencia > 10 && ' No entanto, a inadimplência elevada requer atenção imediata.'}
-                    {cicloFinanceiroData[3].dias > 30 && ' O ciclo de caixa longo impacta a liquidez e deve ser otimizado.'}
-                  </p>
-                  <p className="mt-2">
-                    Com as ações recomendadas implementadas, projetamos melhoria de 
-                    <strong> 20-25% no lucro líquido</strong> nos próximos 6 meses, alcançando margem líquida de 18-20% 
-                    e reduzindo inadimplência para níveis aceitáveis ({'<'}8%).
-                  </p>
-                </AlertDescription>
-              </Alert>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          <footer className="border-t px-6 py-4 sm:px-8 text-xs text-slate-500 flex flex-col sm:flex-row sm:justify-between gap-2 bg-slate-50">
+            <span>Documento gerado automaticamente pelo SisFinance</span>
+            <span>
+              {tipoInfo.titulo} · {formatarDataBR(meta.dataInicio)} a{' '}
+              {formatarDataBR(meta.dataFim)}
+            </span>
+          </footer>
+        </article>
+      )}
     </div>
   );
 }
