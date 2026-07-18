@@ -57,11 +57,12 @@ export interface MovimentoDetalhe {
   data: string;
   empresaId: string;
   empresaNome: string;
-  tipo: 'Receita' | 'Despesa';
+  tipo: 'Receita' | 'Despesa' | 'Transferência';
   descricao: string;
   categoria: string;
   status: string;
   valor: number;
+  formaPagamento?: string;
   terceiro?: string;
 }
 
@@ -88,15 +89,17 @@ export interface GastoFornecedor {
 
 export interface RelatorioCompleto extends RelatorioData {
   agingData: AgingData[];
+  /** Todos os lançamentos do período (fonte principal) */
+  lancamentosDetalhe: MovimentoDetalhe[];
   receitasDetalhe: MovimentoDetalhe[];
   despesasDetalhe: MovimentoDetalhe[];
   porEmpresa: EmpresaResumo[];
   gastosPorFornecedor: GastoFornecedor[];
   totalDespesas: number;
   totalReceitas: number;
+  qtdLancamentos: number;
 }
 
-/** YYYY-MM-DD no fuso local (evita -1 dia do toISOString). */
 export function toLocalDateString(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -128,182 +131,168 @@ const STATUS_RECEBER_ABERTO = [
 const STATUS_RECEBER_RECEBIDO = ['Recebido'];
 const STATUS_PAGAR_PAGO = ['Pago'];
 
-type QueryBuilder = {
-  eq: (column: string, value: unknown) => QueryBuilder;
-  gte: (column: string, value: unknown) => QueryBuilder;
-  lte: (column: string, value: unknown) => QueryBuilder;
-  in: (column: string, values: unknown[]) => QueryBuilder;
+type AnyBuilder = {
+  eq: (c: string, v: unknown) => AnyBuilder;
+  gte: (c: string, v: unknown) => AnyBuilder;
+  lte: (c: string, v: unknown) => AnyBuilder;
+  in: (c: string, v: unknown[]) => AnyBuilder;
+  order: (c: string, o?: { ascending?: boolean }) => AnyBuilder;
   then: PromiseLike<{ data: unknown; error: unknown }>['then'];
 };
 
-function aplicarEmpresa(query: QueryBuilder, empresaId?: string): QueryBuilder {
-  if (empresaId) return query.eq('empresa_id', empresaId);
-  return query;
+/** Consulta robusta: tenta com select informado e cai para `*` se o join falhar. */
+async function queryRows(
+  table: string,
+  opts: {
+    select?: string;
+    empresaId?: string;
+    gte?: [string, string];
+    lte?: [string, string];
+    inFilter?: [string, unknown[]];
+    order?: { column: string; ascending?: boolean };
+  }
+): Promise<any[]> {
+  const trySelect = async (select: string) => {
+    let q = db.from(table).select(select) as unknown as AnyBuilder;
+    if (opts.empresaId) q = q.eq('empresa_id', opts.empresaId);
+    if (opts.gte) q = q.gte(opts.gte[0], opts.gte[1]);
+    if (opts.lte) q = q.lte(opts.lte[0], opts.lte[1]);
+    if (opts.inFilter) q = q.in(opts.inFilter[0], opts.inFilter[1]);
+    if (opts.order) q = q.order(opts.order.column, { ascending: opts.order.ascending ?? true });
+    const { data, error } = await q;
+    if (error) {
+      console.warn(`[relatorio] ${table} select="${select}" falhou:`, error);
+      return { data: null as any[] | null, error };
+    }
+    return { data: (data as any[]) || [], error: null };
+  };
+
+  const preferred = opts.select || '*';
+  const first = await trySelect(preferred);
+  if (!first.error) return first.data || [];
+
+  if (preferred !== '*') {
+    const fallback = await trySelect('*');
+    if (!fallback.error) return fallback.data || [];
+  }
+
+  // Última tentativa: sem filtro de empresa (só período), se empresa estava filtrando
+  if (opts.empresaId) {
+    console.warn(`[relatorio] Tentando ${table} sem filtro de empresa...`);
+    return queryRows(table, { ...opts, empresaId: undefined, select: '*' });
+  }
+
+  return [];
 }
 
 async function buscarEmpresasMap(): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   try {
-    const { data } = await db.from('empresas').select('id, nome');
-    ((data as any[]) || []).forEach((e) => map.set(e.id, e.nome || 'Sem nome'));
+    const rows = await queryRows('empresas', { select: 'id, nome, ativo' });
+    rows.forEach((e) => {
+      if (e.ativo === false) return;
+      map.set(e.id, e.nome || 'Sem nome');
+    });
   } catch (error) {
     console.error('Erro ao buscar empresas:', error);
   }
   return map;
 }
 
-async function buscarLancamentos(filtro: PeriodoFiltro) {
+async function buscarFornecedoresMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
   try {
-    const query = aplicarEmpresa(
-      db
-        .from('lancamentos')
-        .select('*, fornecedores(nome)')
-        .gte('data', filtro.dataInicio)
-        .lte('data', filtro.dataFim) as unknown as QueryBuilder,
-      filtro.empresaId
-    );
-    const { data, error } = await query;
-    if (error) {
-      console.error('Erro ao buscar lançamentos:', error);
-      return [];
-    }
-    return (data as any[]) || [];
-  } catch (error) {
-    console.error('Erro ao buscar lançamentos:', error);
-    return [];
+    const rows = await queryRows('fornecedores', { select: 'id, nome' });
+    rows.forEach((f) => map.set(f.id, f.nome || 'Fornecedor'));
+  } catch {
+    /* ignore */
   }
+  return map;
 }
 
-async function buscarContasReceberPeriodo(filtro: PeriodoFiltro, soRecebidas = false) {
+async function buscarClientesMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
   try {
-    let query = aplicarEmpresa(
-      db
-        .from('contas_receber')
-        .select('*, clientes(nome)')
-        .gte(soRecebidas ? 'data_recebimento' : 'data_vencimento', filtro.dataInicio)
-        .lte(soRecebidas ? 'data_recebimento' : 'data_vencimento', filtro.dataFim) as unknown as QueryBuilder,
-      filtro.empresaId
-    );
-    if (soRecebidas) {
-      query = query.in('status', STATUS_RECEBER_RECEBIDO);
-    }
-    const { data, error } = await query;
-    if (error) {
-      console.error('Erro ao buscar contas a receber:', error);
-      return [];
-    }
-    return (data as any[]) || [];
-  } catch (error) {
-    console.error('Erro ao buscar contas a receber:', error);
-    return [];
+    const rows = await queryRows('clientes', { select: 'id, nome' });
+    rows.forEach((c) => map.set(c.id, c.nome || 'Cliente'));
+  } catch {
+    /* ignore */
   }
-}
-
-async function buscarContasPagarPeriodo(filtro: PeriodoFiltro, soPagas = false) {
-  try {
-    let query = aplicarEmpresa(
-      db
-        .from('contas_pagar')
-        .select('*, fornecedores(nome)')
-        .gte(soPagas ? 'data_pagamento' : 'data_vencimento', filtro.dataInicio)
-        .lte(soPagas ? 'data_pagamento' : 'data_vencimento', filtro.dataFim) as unknown as QueryBuilder,
-      filtro.empresaId
-    );
-    if (soPagas) {
-      query = query.in('status', STATUS_PAGAR_PAGO);
-    }
-    const { data, error } = await query;
-    if (error) {
-      console.error('Erro ao buscar contas a pagar:', error);
-      return [];
-    }
-    return (data as any[]) || [];
-  } catch (error) {
-    console.error('Erro ao buscar contas a pagar:', error);
-    return [];
-  }
+  return map;
 }
 
 function calcularReceitas(lancamentos: any[], contasRecebidas: any[]) {
-  const receitasLancamentos = lancamentos.filter((l) => l.tipo === 'Receita');
-  let receitaBruta = receitasLancamentos.reduce((sum, l) => sum + num(l.valor), 0);
+  const receitasLanc = lancamentos.filter((l) => String(l.tipo).toLowerCase() === 'receita');
+  let receitaBruta = receitasLanc.reduce((sum, l) => sum + num(l.valor), 0);
   const receitaContas = contasRecebidas.reduce((sum, c) => sum + valorConta(c, true), 0);
   if (receitaBruta === 0) receitaBruta = receitaContas;
 
-  const impostosLancamentos = lancamentos.filter(
-    (l) =>
-      l.tipo === 'Despesa' &&
-      (l.categoria?.toLowerCase().includes('imposto') ||
-        l.categoria?.toLowerCase().includes('tributo') ||
-        l.categoria?.toLowerCase().includes('iss') ||
-        l.categoria?.toLowerCase().includes('icms') ||
-        l.categoria?.toLowerCase().includes('pis') ||
-        l.categoria?.toLowerCase().includes('cofins'))
-  );
+  const impostosLanc = lancamentos.filter((l) => {
+    if (String(l.tipo).toLowerCase() !== 'despesa') return false;
+    const cat = String(l.categoria || l.descricao || '').toLowerCase();
+    return (
+      cat.includes('imposto') ||
+      cat.includes('tributo') ||
+      cat.includes('iss') ||
+      cat.includes('icms') ||
+      cat.includes('pis') ||
+      cat.includes('cofins')
+    );
+  });
 
   const impostos =
-    impostosLancamentos.length > 0
-      ? impostosLancamentos.reduce((sum, l) => sum + num(l.valor), 0)
-      : receitaBruta * 0.15;
+    impostosLanc.length > 0
+      ? impostosLanc.reduce((sum, l) => sum + num(l.valor), 0)
+      : receitaBruta > 0
+        ? receitaBruta * 0.15
+        : 0;
 
   return { receitaBruta, impostos, receitaLiquida: receitaBruta - impostos };
 }
 
 function calcularDespesas(lancamentos: any[], contasPagas: any[]) {
-  const despesasLancamentos = lancamentos.filter((l) => l.tipo === 'Despesa');
+  const despesas = lancamentos.filter((l) => String(l.tipo).toLowerCase() === 'despesa');
 
-  const custosVariaveis = despesasLancamentos
+  const match = (l: any, keys: string[]) => {
+    const cat = String(l.categoria || l.descricao || '').toLowerCase();
+    return keys.some((k) => cat.includes(k));
+  };
+
+  const custosVariaveis = despesas
+    .filter((l) => match(l, ['cmv', 'cpv', 'custo variável', 'comiss']))
+    .reduce((s, l) => s + num(l.valor), 0);
+
+  const despesasFinanceiras = despesas
+    .filter((l) => match(l, ['financeira', 'juros', 'tarifa']))
+    .reduce((s, l) => s + num(l.valor), 0);
+
+  const depreciacaoAmortizacao = despesas
+    .filter((l) => match(l, ['deprecia', 'amortiza']))
+    .reduce((s, l) => s + num(l.valor), 0);
+
+  let despesasFixas = despesas
     .filter(
       (l) =>
-        l.categoria?.toLowerCase().includes('cmv') ||
-        l.categoria?.toLowerCase().includes('cpv') ||
-        l.categoria?.toLowerCase().includes('custo variável') ||
-        l.categoria?.toLowerCase().includes('comiss')
+        !match(l, [
+          'cmv',
+          'cpv',
+          'custo variável',
+          'comiss',
+          'financeira',
+          'juros',
+          'tarifa',
+          'deprecia',
+          'amortiza',
+          'imposto',
+          'tributo',
+        ])
     )
-    .reduce((sum, l) => sum + num(l.valor), 0);
+    .reduce((s, l) => s + num(l.valor), 0);
 
-  const despesasFinanceiras = despesasLancamentos
-    .filter(
-      (l) =>
-        l.categoria?.toLowerCase().includes('financeira') ||
-        l.categoria?.toLowerCase().includes('juros') ||
-        l.categoria?.toLowerCase().includes('tarifa')
-    )
-    .reduce((sum, l) => sum + num(l.valor), 0);
-
-  const depreciacaoAmortizacao = despesasLancamentos
-    .filter(
-      (l) =>
-        l.categoria?.toLowerCase().includes('deprecia') ||
-        l.categoria?.toLowerCase().includes('amortiza')
-    )
-    .reduce((sum, l) => sum + num(l.valor), 0);
-
-  let despesasFixas = despesasLancamentos
-    .filter((l) => {
-      const cat = l.categoria?.toLowerCase() || '';
-      return (
-        !cat.includes('cmv') &&
-        !cat.includes('cpv') &&
-        !cat.includes('custo variável') &&
-        !cat.includes('comiss') &&
-        !cat.includes('financeira') &&
-        !cat.includes('juros') &&
-        !cat.includes('tarifa') &&
-        !cat.includes('deprecia') &&
-        !cat.includes('amortiza') &&
-        !cat.includes('imposto') &&
-        !cat.includes('tributo')
-      );
-    })
-    .reduce((sum, l) => sum + num(l.valor), 0);
-
-  const totalDespesasLanc =
+  const totalLanc =
     custosVariaveis + despesasFixas + despesasFinanceiras + depreciacaoAmortizacao;
-  const totalContasPagas = contasPagas.reduce((sum, c) => sum + valorConta(c, true), 0);
-  if (totalDespesasLanc === 0 && totalContasPagas > 0) {
-    despesasFixas = totalContasPagas;
-  }
+  const totalContas = contasPagas.reduce((s, c) => s + valorConta(c, true), 0);
+  if (totalLanc === 0 && totalContas > 0) despesasFixas = totalContas;
 
   return { custosVariaveis, despesasFixas, despesasFinanceiras, depreciacaoAmortizacao };
 }
@@ -315,173 +304,162 @@ async function calcularFluxoCaixa(
   lancamentos: any[]
 ) {
   try {
-    const dataInicial = new Date(`${filtro.dataInicio}T12:00:00`);
-    const dataAnterior = new Date(dataInicial);
+    const dataAnterior = new Date(`${filtro.dataInicio}T12:00:00`);
     dataAnterior.setDate(dataAnterior.getDate() - 1);
     const dataAnteriorStr = toLocalDateString(dataAnterior);
 
-    const queryAnt = aplicarEmpresa(
-      db.from('lancamentos').select('*').lte('data', dataAnteriorStr) as unknown as QueryBuilder,
-      filtro.empresaId
-    );
-    const { data: lancamentosAnteriores } = await queryAnt;
+    const anteriores = await queryRows('lancamentos', {
+      select: '*',
+      empresaId: filtro.empresaId,
+      lte: ['data', dataAnteriorStr],
+    });
 
-    const entradasAnteriores = ((lancamentosAnteriores as any[]) || [])
-      .filter((l) => l.tipo === 'Receita')
-      .reduce((sum, l) => sum + num(l.valor), 0);
-    const saidasAnteriores = ((lancamentosAnteriores as any[]) || [])
-      .filter((l) => l.tipo === 'Despesa')
-      .reduce((sum, l) => sum + num(l.valor), 0);
-    const saldoInicial = entradasAnteriores - saidasAnteriores;
+    const saldoInicial =
+      anteriores
+        .filter((l) => String(l.tipo).toLowerCase() === 'receita')
+        .reduce((s, l) => s + num(l.valor), 0) -
+      anteriores
+        .filter((l) => String(l.tipo).toLowerCase() === 'despesa')
+        .reduce((s, l) => s + num(l.valor), 0);
 
-    let entradas = contasRecebidas.reduce((sum, c) => sum + valorConta(c, true), 0);
-    let saidas = contasPagas.reduce((sum, c) => sum + valorConta(c, true), 0);
+    let entradas = contasRecebidas.reduce((s, c) => s + valorConta(c, true), 0);
+    let saidas = contasPagas.reduce((s, c) => s + valorConta(c, true), 0);
 
-    const statusCaixa = ['Realizado', 'Recebido', 'Pago'];
-    if (entradas === 0) {
+    const statusCaixa = ['realizado', 'recebido', 'pago'];
+    const entradasLanc = lancamentos
+      .filter(
+        (l) =>
+          String(l.tipo).toLowerCase() === 'receita' &&
+          statusCaixa.includes(String(l.status || '').toLowerCase())
+      )
+      .reduce((s, l) => s + num(l.valor), 0);
+    const saidasLanc = lancamentos
+      .filter(
+        (l) =>
+          String(l.tipo).toLowerCase() === 'despesa' &&
+          statusCaixa.includes(String(l.status || '').toLowerCase())
+      )
+      .reduce((s, l) => s + num(l.valor), 0);
+
+    // Preferência: lançamentos realizados; se vazios, usa contas
+    if (entradasLanc > 0) entradas = entradasLanc;
+    else if (entradas === 0) {
       entradas = lancamentos
-        .filter((l) => l.tipo === 'Receita' && statusCaixa.includes(l.status))
-        .reduce((sum, l) => sum + num(l.valor), 0);
-    }
-    if (saidas === 0) {
-      saidas = lancamentos
-        .filter((l) => l.tipo === 'Despesa' && statusCaixa.includes(l.status))
-        .reduce((sum, l) => sum + num(l.valor), 0);
+        .filter((l) => String(l.tipo).toLowerCase() === 'receita')
+        .reduce((s, l) => s + num(l.valor), 0);
     }
 
-    const saldoFinal = saldoInicial + entradas - saidas;
+    if (saidasLanc > 0) saidas = saidasLanc;
+    else if (saidas === 0) {
+      saidas = lancamentos
+        .filter((l) => String(l.tipo).toLowerCase() === 'despesa')
+        .reduce((s, l) => s + num(l.valor), 0);
+    }
+
     const dataIni = new Date(`${filtro.dataInicio}T12:00:00`);
     const dataFim = new Date(`${filtro.dataFim}T12:00:00`);
-    const diasPeriodo = Math.max(
+    const dias = Math.max(
       1,
-      Math.floor((dataFim.getTime() - dataIni.getTime()) / (1000 * 60 * 60 * 24)) + 1
+      Math.floor((dataFim.getTime() - dataIni.getTime()) / 86400000) + 1
     );
 
     return {
       saldoInicial,
       entradas,
       saidas,
-      saldoFinal,
-      burnRate: (saidas / diasPeriodo) * 30,
+      saldoFinal: saldoInicial + entradas - saidas,
+      burnRate: (saidas / dias) * 30,
     };
   } catch (error) {
-    console.error('Erro ao calcular fluxo de caixa:', error);
+    console.error('Erro fluxo de caixa:', error);
     return { saldoInicial: 0, entradas: 0, saidas: 0, saldoFinal: 0, burnRate: 0 };
   }
 }
 
 async function calcularPrazosMedios(filtro: PeriodoFiltro) {
   try {
-    let qRec = aplicarEmpresa(
-      db
-        .from('contas_receber')
-        .select('data_emissao, data_recebimento')
-        .in('status', STATUS_RECEBER_RECEBIDO)
-        .gte('data_recebimento', filtro.dataInicio)
-        .lte('data_recebimento', filtro.dataFim) as unknown as QueryBuilder,
-      filtro.empresaId
-    );
-    const { data: contasRecebidas } = await qRec;
+    const recebidas = await queryRows('contas_receber', {
+      select: 'data_emissao, data_recebimento',
+      empresaId: filtro.empresaId,
+      inFilter: ['status', STATUS_RECEBER_RECEBIDO],
+      gte: ['data_recebimento', filtro.dataInicio],
+      lte: ['data_recebimento', filtro.dataFim],
+    });
 
     let pmr = 28;
-    const recebidas = ((contasRecebidas as any[]) || []).filter(
-      (c) => c.data_emissao && c.data_recebimento
-    );
-    if (recebidas.length > 0) {
-      const totalDias = recebidas.reduce((sum, c) => {
-        const emissao = new Date(`${c.data_emissao}T12:00:00`);
-        const recebimento = new Date(`${c.data_recebimento}T12:00:00`);
-        return (
-          sum +
-          Math.max(
-            0,
-            Math.floor((recebimento.getTime() - emissao.getTime()) / (1000 * 60 * 60 * 24))
-          )
-        );
+    const recOk = recebidas.filter((c) => c.data_emissao && c.data_recebimento);
+    if (recOk.length > 0) {
+      const total = recOk.reduce((sum, c) => {
+        const a = new Date(`${c.data_emissao}T12:00:00`).getTime();
+        const b = new Date(`${c.data_recebimento}T12:00:00`).getTime();
+        return sum + Math.max(0, Math.floor((b - a) / 86400000));
       }, 0);
-      pmr = Math.round(totalDias / recebidas.length);
+      pmr = Math.round(total / recOk.length);
     }
 
-    let qPag = aplicarEmpresa(
-      db
-        .from('contas_pagar')
-        .select('data_emissao, data_pagamento')
-        .in('status', STATUS_PAGAR_PAGO)
-        .gte('data_pagamento', filtro.dataInicio)
-        .lte('data_pagamento', filtro.dataFim) as unknown as QueryBuilder,
-      filtro.empresaId
-    );
-    const { data: contasPagas } = await qPag;
+    const pagas = await queryRows('contas_pagar', {
+      select: 'data_emissao, data_pagamento',
+      empresaId: filtro.empresaId,
+      inFilter: ['status', STATUS_PAGAR_PAGO],
+      gte: ['data_pagamento', filtro.dataInicio],
+      lte: ['data_pagamento', filtro.dataFim],
+    });
 
     let pmp = 35;
-    const pagas = ((contasPagas as any[]) || []).filter(
-      (c) => c.data_emissao && c.data_pagamento
-    );
-    if (pagas.length > 0) {
-      const totalDias = pagas.reduce((sum, c) => {
-        const emissao = new Date(`${c.data_emissao}T12:00:00`);
-        const pagamento = new Date(`${c.data_pagamento}T12:00:00`);
-        return (
-          sum +
-          Math.max(
-            0,
-            Math.floor((pagamento.getTime() - emissao.getTime()) / (1000 * 60 * 60 * 24))
-          )
-        );
+    const pagOk = pagas.filter((c) => c.data_emissao && c.data_pagamento);
+    if (pagOk.length > 0) {
+      const total = pagOk.reduce((sum, c) => {
+        const a = new Date(`${c.data_emissao}T12:00:00`).getTime();
+        const b = new Date(`${c.data_pagamento}T12:00:00`).getTime();
+        return sum + Math.max(0, Math.floor((b - a) / 86400000));
       }, 0);
-      pmp = Math.round(totalDias / pagas.length);
+      pmp = Math.round(total / pagOk.length);
     }
 
     return { pmr, pmp, pme: 22 };
-  } catch (error) {
-    console.error('Erro ao calcular prazos médios:', error);
+  } catch {
     return { pmr: 28, pmp: 35, pme: 22 };
   }
 }
 
 async function calcularAging(empresaId?: string) {
+  const vazios = (): AgingData[] => [
+    { periodo: 'A Vencer', valor: 0, percentual: 0, quantidade: 0 },
+    { periodo: '1-30 dias', valor: 0, percentual: 0, quantidade: 0 },
+    { periodo: '31-60 dias', valor: 0, percentual: 0, quantidade: 0 },
+    { periodo: '61-90 dias', valor: 0, percentual: 0, quantidade: 0 },
+    { periodo: '> 90 dias', valor: 0, percentual: 0, quantidade: 0 },
+  ];
+
   try {
-    const query = aplicarEmpresa(
-      db
-        .from('contas_receber')
-        .select('*')
-        .in('status', STATUS_RECEBER_ABERTO) as unknown as QueryBuilder,
-      empresaId
-    );
-    const { data: contasReceber, error } = await query;
-    if (error) console.error('Erro ao buscar contas a receber (aging):', error);
+    const contas = await queryRows('contas_receber', {
+      select: '*',
+      empresaId,
+      inFilter: ['status', STATUS_RECEBER_ABERTO],
+    });
 
     const hoje = new Date();
     hoje.setHours(12, 0, 0, 0);
-
-    const aging: AgingData[] = [
-      { periodo: 'A Vencer', valor: 0, percentual: 0, quantidade: 0 },
-      { periodo: '1-30 dias', valor: 0, percentual: 0, quantidade: 0 },
-      { periodo: '31-60 dias', valor: 0, percentual: 0, quantidade: 0 },
-      { periodo: '61-90 dias', valor: 0, percentual: 0, quantidade: 0 },
-      { periodo: '> 90 dias', valor: 0, percentual: 0, quantidade: 0 },
-    ];
-
+    const aging = vazios();
     let totalReceber = 0;
-    ((contasReceber as any[]) || []).forEach((conta) => {
+
+    contas.forEach((conta) => {
       if (!conta.data_vencimento) return;
-      const vencimento = new Date(`${conta.data_vencimento}T12:00:00`);
-      const diasVencidos = Math.floor(
-        (hoje.getTime() - vencimento.getTime()) / (1000 * 60 * 60 * 24)
-      );
+      const venc = new Date(`${conta.data_vencimento}T12:00:00`);
+      const dias = Math.floor((hoje.getTime() - venc.getTime()) / 86400000);
       const valor = Math.max(0, num(conta.valor_total) - num(conta.valor_recebido));
       if (valor <= 0) return;
       totalReceber += valor;
-      if (diasVencidos < 0) {
+      if (dias < 0) {
         aging[0].valor += valor;
         aging[0].quantidade++;
-      } else if (diasVencidos <= 30) {
+      } else if (dias <= 30) {
         aging[1].valor += valor;
         aging[1].quantidade++;
-      } else if (diasVencidos <= 60) {
+      } else if (dias <= 60) {
         aging[2].valor += valor;
         aging[2].quantidade++;
-      } else if (diasVencidos <= 90) {
+      } else if (dias <= 90) {
         aging[3].valor += valor;
         aging[3].quantidade++;
       } else {
@@ -493,7 +471,7 @@ async function calcularAging(empresaId?: string) {
     aging.forEach((a) => {
       a.percentual = totalReceber > 0 ? (a.valor / totalReceber) * 100 : 0;
     });
-    const totalVencido = aging.slice(1).reduce((sum, a) => sum + a.valor, 0);
+    const totalVencido = aging.slice(1).reduce((s, a) => s + a.valor, 0);
 
     return {
       aging,
@@ -502,16 +480,9 @@ async function calcularAging(empresaId?: string) {
       percentualInadimplencia: totalReceber > 0 ? (totalVencido / totalReceber) * 100 : 0,
       provisaoDevedoresDuvidosos: totalVencido * 0.3,
     };
-  } catch (error) {
-    console.error('Erro ao calcular aging:', error);
+  } catch {
     return {
-      aging: [
-        { periodo: 'A Vencer', valor: 0, percentual: 0, quantidade: 0 },
-        { periodo: '1-30 dias', valor: 0, percentual: 0, quantidade: 0 },
-        { periodo: '31-60 dias', valor: 0, percentual: 0, quantidade: 0 },
-        { periodo: '61-90 dias', valor: 0, percentual: 0, quantidade: 0 },
-        { periodo: '> 90 dias', valor: 0, percentual: 0, quantidade: 0 },
-      ],
+      aging: vazios(),
       totalReceber: 0,
       totalVencido: 0,
       percentualInadimplencia: 0,
@@ -520,76 +491,86 @@ async function calcularAging(empresaId?: string) {
   }
 }
 
-function montarDetalhes(
-  lancamentos: any[],
-  contasReceber: any[],
-  contasPagar: any[],
-  empresasMap: Map<string, string>
-): { receitasDetalhe: MovimentoDetalhe[]; despesasDetalhe: MovimentoDetalhe[] } {
-  const receitasDetalhe: MovimentoDetalhe[] = [];
-  const despesasDetalhe: MovimentoDetalhe[] = [];
+function normalizarTipo(tipo: unknown): 'Receita' | 'Despesa' | 'Transferência' {
+  const t = String(tipo || '').toLowerCase();
+  if (t.includes('receita')) return 'Receita';
+  if (t.includes('transf')) return 'Transferência';
+  return 'Despesa';
+}
 
-  lancamentos.forEach((l) => {
-    const item: MovimentoDetalhe = {
+function montarLancamentosDetalhe(
+  lancamentos: any[],
+  empresasMap: Map<string, string>,
+  fornecedoresMap: Map<string, string>
+): MovimentoDetalhe[] {
+  return lancamentos
+    .map((l) => ({
       id: String(l.id),
-      origem: 'Lancamento',
-      data: l.data || '',
+      origem: 'Lancamento' as const,
+      data: String(l.data || '').slice(0, 10),
       empresaId: l.empresa_id || '',
       empresaNome: empresasMap.get(l.empresa_id) || 'Sem empresa',
-      tipo: l.tipo === 'Receita' ? 'Receita' : 'Despesa',
+      tipo: normalizarTipo(l.tipo),
       descricao: l.descricao || '-',
-      categoria: l.categoria || '-',
+      categoria: l.categoria || l.forma_pagamento || '-',
       status: l.status || '-',
       valor: num(l.valor),
-      terceiro: l.fornecedores?.nome || l.clientes?.nome || undefined,
-    };
-    if (l.tipo === 'Receita') receitasDetalhe.push(item);
-    else if (l.tipo === 'Despesa') despesasDetalhe.push(item);
-  });
+      formaPagamento: l.forma_pagamento || undefined,
+      terceiro:
+        l.fornecedores?.nome ||
+        fornecedoresMap.get(l.fornecedor_id) ||
+        undefined,
+    }))
+    .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+}
 
-  contasReceber.forEach((c) => {
-    receitasDetalhe.push({
-      id: String(c.id),
-      origem: 'Conta a Receber',
-      data: c.data_recebimento || c.data_vencimento || c.data_emissao || '',
-      empresaId: c.empresa_id || '',
-      empresaNome: empresasMap.get(c.empresa_id) || 'Sem empresa',
-      tipo: 'Receita',
-      descricao: c.descricao || c.clientes?.nome || 'Conta a receber',
-      categoria: c.categoria || 'Contas a Receber',
-      status: c.status || '-',
-      valor: valorConta(c, c.status === 'Recebido'),
-      terceiro: c.clientes?.nome,
-    });
-  });
+function montarDetalhesContas(
+  contasReceber: any[],
+  contasPagar: any[],
+  empresasMap: Map<string, string>,
+  clientesMap: Map<string, string>,
+  fornecedoresMap: Map<string, string>
+): { receitasDetalhe: MovimentoDetalhe[]; despesasDetalhe: MovimentoDetalhe[] } {
+  const receitasDetalhe: MovimentoDetalhe[] = contasReceber.map((c) => ({
+    id: String(c.id),
+    origem: 'Conta a Receber' as const,
+    data: String(c.data_recebimento || c.data_vencimento || c.data_emissao || '').slice(0, 10),
+    empresaId: c.empresa_id || '',
+    empresaNome: empresasMap.get(c.empresa_id) || 'Sem empresa',
+    tipo: 'Receita' as const,
+    descricao: c.descricao || c.clientes?.nome || clientesMap.get(c.cliente_id) || 'Conta a receber',
+    categoria: c.categoria || 'Contas a Receber',
+    status: c.status || '-',
+    valor: valorConta(c, String(c.status).toLowerCase() === 'recebido'),
+    terceiro: c.clientes?.nome || clientesMap.get(c.cliente_id),
+  }));
 
-  contasPagar.forEach((c) => {
-    despesasDetalhe.push({
-      id: String(c.id),
-      origem: 'Conta a Pagar',
-      data: c.data_pagamento || c.data_vencimento || c.data_emissao || '',
-      empresaId: c.empresa_id || '',
-      empresaNome: empresasMap.get(c.empresa_id) || 'Sem empresa',
-      tipo: 'Despesa',
-      descricao: c.descricao || c.fornecedores?.nome || 'Conta a pagar',
-      categoria: c.categoria || 'Contas a Pagar',
-      status: c.status || '-',
-      valor: valorConta(c, c.status === 'Pago'),
-      terceiro: c.fornecedores?.nome,
-    });
-  });
+  const despesasDetalhe: MovimentoDetalhe[] = contasPagar.map((c) => ({
+    id: String(c.id),
+    origem: 'Conta a Pagar' as const,
+    data: String(c.data_pagamento || c.data_vencimento || c.data_emissao || '').slice(0, 10),
+    empresaId: c.empresa_id || '',
+    empresaNome: empresasMap.get(c.empresa_id) || 'Sem empresa',
+    tipo: 'Despesa' as const,
+    descricao:
+      c.descricao || c.fornecedores?.nome || fornecedoresMap.get(c.fornecedor_id) || 'Conta a pagar',
+    categoria: c.categoria || 'Contas a Pagar',
+    status: c.status || '-',
+    valor: valorConta(c, String(c.status).toLowerCase() === 'pago'),
+    terceiro: c.fornecedores?.nome || fornecedoresMap.get(c.fornecedor_id),
+  }));
 
   const byDate = (a: MovimentoDetalhe, b: MovimentoDetalhe) =>
     (b.data || '').localeCompare(a.data || '');
   receitasDetalhe.sort(byDate);
   despesasDetalhe.sort(byDate);
-
   return { receitasDetalhe, despesasDetalhe };
 }
 
 function montarPorEmpresa(
-  receitasDetalhe: MovimentoDetalhe[],
-  despesasDetalhe: MovimentoDetalhe[],
+  lancamentosDetalhe: MovimentoDetalhe[],
+  receitasExtra: MovimentoDetalhe[],
+  despesasExtra: MovimentoDetalhe[],
   empresasMap: Map<string, string>
 ): EmpresaResumo[] {
   const map = new Map<
@@ -623,27 +604,37 @@ function montarPorEmpresa(
     return map.get(id)!;
   };
 
-  // Garante todas as empresas cadastradas aparecem
   empresasMap.forEach((nome, id) => {
-    const row = ensure(id);
-    row.empresaNome = nome;
+    ensure(id).empresaNome = nome;
   });
 
-  receitasDetalhe.forEach((r) => {
-    const row = ensure(r.empresaId);
-    row.receitas += r.valor;
-    row.qtdReceitas += 1;
-    if (['Recebido', 'Realizado', 'Pago'].includes(r.status) || r.origem === 'Lancamento') {
-      row.entradas += r.valor;
+  // Lançamentos são a fonte principal
+  lancamentosDetalhe.forEach((l) => {
+    const row = ensure(l.empresaId);
+    if (l.tipo === 'Receita') {
+      row.receitas += l.valor;
+      row.entradas += l.valor;
+      row.qtdReceitas += 1;
+    } else if (l.tipo === 'Despesa') {
+      row.despesas += l.valor;
+      row.saidas += l.valor;
+      row.qtdDespesas += 1;
     }
   });
 
-  despesasDetalhe.forEach((d) => {
+  // Complementa com contas só se a empresa não tiver lançamentos daquele tipo
+  receitasExtra.forEach((r) => {
+    const row = ensure(r.empresaId);
+    if (row.qtdReceitas === 0) {
+      row.receitas += r.valor;
+      row.qtdReceitas += 1;
+    }
+  });
+  despesasExtra.forEach((d) => {
     const row = ensure(d.empresaId);
-    row.despesas += d.valor;
-    row.qtdDespesas += 1;
-    if (['Pago', 'Realizado', 'Recebido'].includes(d.status) || d.origem === 'Lancamento') {
-      row.saidas += d.valor;
+    if (row.qtdDespesas === 0) {
+      row.despesas += d.valor;
+      row.qtdDespesas += 1;
     }
   });
 
@@ -661,11 +652,9 @@ function montarPorEmpresa(
     .sort((a, b) => b.despesas - a.despesas || b.receitas - a.receitas);
 }
 
-function montarGastosFornecedor(
-  despesasDetalhe: MovimentoDetalhe[]
-): GastoFornecedor[] {
+function montarGastosFornecedor(despesas: MovimentoDetalhe[]): GastoFornecedor[] {
   const map = new Map<string, { nome: string; total: number; quantidade: number }>();
-  despesasDetalhe.forEach((d) => {
+  despesas.forEach((d) => {
     const nome = d.terceiro || 'Sem fornecedor';
     const atual = map.get(nome);
     if (atual) {
@@ -707,6 +696,10 @@ export function calcularIntervaloPeriodo(
       dataInicio = new Date(hoje.getFullYear(), 0, 1);
       break;
     }
+    case 'tudo': {
+      dataInicio = new Date(2000, 0, 1);
+      break;
+    }
     case 'mes-atual':
     default: {
       dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
@@ -724,132 +717,201 @@ export function calcularIntervaloPeriodo(
 export async function gerarRelatorioCompleto(
   filtro: PeriodoFiltro
 ): Promise<RelatorioCompleto> {
-  try {
-    console.log('🔄 Gerando relatório para:', filtro);
+  console.log('🔄 Gerando relatório profissional:', filtro);
 
-    const [
-      empresasMap,
-      lancamentos,
-      contasRecebidas,
-      contasPagas,
-      contasReceberTodas,
-      contasPagarTodas,
-    ] = await Promise.all([
-      buscarEmpresasMap(),
-      buscarLancamentos(filtro),
-      buscarContasReceberPeriodo(filtro, true),
-      buscarContasPagarPeriodo(filtro, true),
-      buscarContasReceberPeriodo(filtro, false),
-      buscarContasPagarPeriodo(filtro, false),
-    ]);
+  const [empresasMap, fornecedoresMap, clientesMap] = await Promise.all([
+    buscarEmpresasMap(),
+    buscarFornecedoresMap(),
+    buscarClientesMap(),
+  ]);
 
-    const { receitaBruta, impostos, receitaLiquida } = calcularReceitas(
-      lancamentos,
-      contasRecebidas
+  // Lançamentos: fonte principal — select simples (sem join) para não falhar
+  let lancamentos = await queryRows('lancamentos', {
+    select: '*',
+    empresaId: filtro.empresaId,
+    gte: ['data', filtro.dataInicio],
+    lte: ['data', filtro.dataFim],
+    order: { column: 'data', ascending: false },
+  });
+
+  // Se período sem lançamentos, tenta sem filtro de data (último recurso informativo)
+  if (lancamentos.length === 0) {
+    console.warn(
+      '⚠️ Nenhum lançamento no período. Buscando todos os lançamentos para diagnóstico...'
     );
-    const {
-      custosVariaveis,
-      despesasFixas,
-      despesasFinanceiras,
-      depreciacaoAmortizacao,
-    } = calcularDespesas(lancamentos, contasPagas);
-
-    const margemContribuicao = receitaLiquida - custosVariaveis;
-    const ebitda = margemContribuicao - despesasFixas;
-    const ebit = ebitda - depreciacaoAmortizacao;
-    const receitasFinanceiras = lancamentos
-      .filter(
-        (l) =>
-          l.tipo === 'Receita' && l.categoria?.toLowerCase().includes('financeira')
-      )
-      .reduce((sum, l) => sum + num(l.valor), 0);
-    const lair = ebit + receitasFinanceiras - despesasFinanceiras;
-    const impostoRenda = Math.max(0, lair * 0.3);
-    const lucroLiquido = lair - impostoRenda;
-
-    const fluxoCaixa = await calcularFluxoCaixa(
-      filtro,
-      contasRecebidas,
-      contasPagas,
-      lancamentos
-    );
-
-    const margemBruta =
-      receitaLiquida > 0 ? (margemContribuicao / receitaLiquida) * 100 : 0;
-    const margemLiquida =
-      receitaLiquida > 0 ? (lucroLiquido / receitaLiquida) * 100 : 0;
-    const roi =
-      receitaLiquida > 0 ? (lucroLiquido / (receitaLiquida / 2)) * 100 : 0;
-    const pontoEquilibrio =
-      margemBruta > 0 ? despesasFixas / (margemBruta / 100) : 0;
-
-    const [prazosMedios, inadimplencia] = await Promise.all([
-      calcularPrazosMedios(filtro),
-      calcularAging(filtro.empresaId),
-    ]);
-
-    const { receitasDetalhe, despesasDetalhe } = montarDetalhes(
-      lancamentos,
-      contasReceberTodas,
-      contasPagarTodas,
-      empresasMap
-    );
-
-    // Evita duplicar lançamentos vs contas: se há lançamentos de receita, detalhe de contas só as não cobertas fica ok
-    // Mantemos ambos para visão completa do sistema (origem distinta)
-
-    const porEmpresa = montarPorEmpresa(receitasDetalhe, despesasDetalhe, empresasMap);
-    const gastosPorFornecedor = montarGastosFornecedor(despesasDetalhe);
-
-    const totalReceitas = receitasDetalhe.reduce((s, r) => s + r.valor, 0);
-    const totalDespesas = despesasDetalhe.reduce((s, d) => s + d.valor, 0);
-
-    const orcadoReceita = receitaBruta > 0 ? receitaBruta * 0.95 : 0;
-    const orcadoDespesas = fluxoCaixa.saidas > 0 ? fluxoCaixa.saidas * 1.08 : 0;
-
-    return {
-      receitaBruta,
-      impostos,
-      receitaLiquida,
-      custosVariaveis,
-      margemContribuicao,
-      despesasFixas,
-      ebitda,
-      depreciacaoAmortizacao,
-      ebit,
-      despesasFinanceiras,
-      receitasFinanceiras,
-      lair,
-      impostoRenda,
-      lucroLiquido,
-      ...fluxoCaixa,
-      margemBruta,
-      margemLiquida,
-      roi,
-      pontoEquilibrio,
-      ...prazosMedios,
-      totalReceber: inadimplencia.totalReceber,
-      totalVencido: inadimplencia.totalVencido,
-      percentualInadimplencia: inadimplencia.percentualInadimplencia,
-      provisaoDevedoresDuvidosos: inadimplencia.provisaoDevedoresDuvidosos,
-      agingData: inadimplencia.aging,
-      orcadoReceita,
-      orcadoDespesas,
-      desvioReceita:
-        orcadoReceita > 0 ? ((receitaBruta - orcadoReceita) / orcadoReceita) * 100 : 0,
-      desvioDespesas:
-        orcadoDespesas > 0
-          ? ((fluxoCaixa.saidas - orcadoDespesas) / orcadoDespesas) * 100
-          : 0,
-      receitasDetalhe,
-      despesasDetalhe,
-      porEmpresa,
-      gastosPorFornecedor,
-      totalReceitas,
-      totalDespesas,
-    };
-  } catch (error) {
-    console.error('❌ Erro ao gerar relatório completo:', error);
-    throw error;
+    const todos = await queryRows('lancamentos', {
+      select: '*',
+      empresaId: filtro.empresaId,
+      order: { column: 'data', ascending: false },
+    });
+    console.log(`📋 Total de lançamentos no banco (escopo): ${todos.length}`);
+    // Mantém vazio no período, mas se "tudo" não foi pedido, não mistura datas fora
   }
+
+  const [contasRecebidas, contasPagas, contasReceberTodas, contasPagarTodas] =
+    await Promise.all([
+      queryRows('contas_receber', {
+        select: '*',
+        empresaId: filtro.empresaId,
+        inFilter: ['status', STATUS_RECEBER_RECEBIDO],
+        gte: ['data_recebimento', filtro.dataInicio],
+        lte: ['data_recebimento', filtro.dataFim],
+      }),
+      queryRows('contas_pagar', {
+        select: '*',
+        empresaId: filtro.empresaId,
+        inFilter: ['status', STATUS_PAGAR_PAGO],
+        gte: ['data_pagamento', filtro.dataInicio],
+        lte: ['data_pagamento', filtro.dataFim],
+      }),
+      queryRows('contas_receber', {
+        select: '*',
+        empresaId: filtro.empresaId,
+        gte: ['data_vencimento', filtro.dataInicio],
+        lte: ['data_vencimento', filtro.dataFim],
+      }),
+      queryRows('contas_pagar', {
+        select: '*',
+        empresaId: filtro.empresaId,
+        gte: ['data_vencimento', filtro.dataInicio],
+        lte: ['data_vencimento', filtro.dataFim],
+      }),
+    ]);
+
+  console.log('📊 Contagens:', {
+    lancamentos: lancamentos.length,
+    contasRecebidas: contasRecebidas.length,
+    contasPagas: contasPagas.length,
+  });
+
+  const { receitaBruta, impostos, receitaLiquida } = calcularReceitas(
+    lancamentos,
+    contasRecebidas
+  );
+  const {
+    custosVariaveis,
+    despesasFixas,
+    despesasFinanceiras,
+    depreciacaoAmortizacao,
+  } = calcularDespesas(lancamentos, contasPagas);
+
+  const margemContribuicao = receitaLiquida - custosVariaveis;
+  const ebitda = margemContribuicao - despesasFixas;
+  const ebit = ebitda - depreciacaoAmortizacao;
+  const receitasFinanceiras = lancamentos
+    .filter(
+      (l) =>
+        String(l.tipo).toLowerCase() === 'receita' &&
+        String(l.categoria || l.descricao || '')
+          .toLowerCase()
+          .includes('financeira')
+    )
+    .reduce((s, l) => s + num(l.valor), 0);
+  const lair = ebit + receitasFinanceiras - despesasFinanceiras;
+  const impostoRenda = Math.max(0, lair * 0.3);
+  const lucroLiquido = lair - impostoRenda;
+
+  const fluxoCaixa = await calcularFluxoCaixa(
+    filtro,
+    contasRecebidas,
+    contasPagas,
+    lancamentos
+  );
+
+  const margemBruta =
+    receitaLiquida > 0 ? (margemContribuicao / receitaLiquida) * 100 : 0;
+  const margemLiquida =
+    receitaLiquida > 0 ? (lucroLiquido / receitaLiquida) * 100 : 0;
+  const roi = receitaLiquida > 0 ? (lucroLiquido / (receitaLiquida / 2)) * 100 : 0;
+  const pontoEquilibrio =
+    margemBruta > 0 ? despesasFixas / (margemBruta / 100) : 0;
+
+  const [prazosMedios, inadimplencia] = await Promise.all([
+    calcularPrazosMedios(filtro),
+    calcularAging(filtro.empresaId),
+  ]);
+
+  const lancamentosDetalhe = montarLancamentosDetalhe(
+    lancamentos,
+    empresasMap,
+    fornecedoresMap
+  );
+
+  const { receitasDetalhe: receitasContas, despesasDetalhe: despesasContas } =
+    montarDetalhesContas(
+      contasReceberTodas,
+      contasPagarTodas,
+      empresasMap,
+      clientesMap,
+      fornecedoresMap
+    );
+
+  // Receitas/despesas detalhadas = lançamentos + contas
+  const receitasDetalhe = [
+    ...lancamentosDetalhe.filter((l) => l.tipo === 'Receita'),
+    ...receitasContas,
+  ].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+
+  const despesasDetalhe = [
+    ...lancamentosDetalhe.filter((l) => l.tipo === 'Despesa'),
+    ...despesasContas,
+  ].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+
+  const porEmpresa = montarPorEmpresa(
+    lancamentosDetalhe,
+    receitasContas,
+    despesasContas,
+    empresasMap
+  );
+  const gastosPorFornecedor = montarGastosFornecedor(despesasDetalhe);
+
+  const totalReceitas = receitasDetalhe.reduce((s, r) => s + r.valor, 0);
+  const totalDespesas = despesasDetalhe.reduce((s, d) => s + d.valor, 0);
+
+  const orcadoReceita = receitaBruta > 0 ? receitaBruta * 0.95 : 0;
+  const orcadoDespesas = fluxoCaixa.saidas > 0 ? fluxoCaixa.saidas * 1.08 : 0;
+
+  return {
+    receitaBruta,
+    impostos,
+    receitaLiquida,
+    custosVariaveis,
+    margemContribuicao,
+    despesasFixas,
+    ebitda,
+    depreciacaoAmortizacao,
+    ebit,
+    despesasFinanceiras,
+    receitasFinanceiras,
+    lair,
+    impostoRenda,
+    lucroLiquido,
+    ...fluxoCaixa,
+    margemBruta,
+    margemLiquida,
+    roi,
+    pontoEquilibrio,
+    ...prazosMedios,
+    totalReceber: inadimplencia.totalReceber,
+    totalVencido: inadimplencia.totalVencido,
+    percentualInadimplencia: inadimplencia.percentualInadimplencia,
+    provisaoDevedoresDuvidosos: inadimplencia.provisaoDevedoresDuvidosos,
+    agingData: inadimplencia.aging,
+    orcadoReceita,
+    orcadoDespesas,
+    desvioReceita:
+      orcadoReceita > 0 ? ((receitaBruta - orcadoReceita) / orcadoReceita) * 100 : 0,
+    desvioDespesas:
+      orcadoDespesas > 0
+        ? ((fluxoCaixa.saidas - orcadoDespesas) / orcadoDespesas) * 100
+        : 0,
+    lancamentosDetalhe,
+    receitasDetalhe,
+    despesasDetalhe,
+    porEmpresa,
+    gastosPorFornecedor,
+    totalReceitas,
+    totalDespesas,
+    qtdLancamentos: lancamentosDetalhe.length,
+  };
 }

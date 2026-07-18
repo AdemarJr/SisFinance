@@ -39,6 +39,7 @@ import {
   Printer,
   Building2,
   List,
+  Receipt,
 } from 'lucide-react';
 import {
   BarChart,
@@ -227,15 +228,17 @@ function TabelaMovimentos({
 export function Relatorios() {
   const { empresaSelecionada, empresaAtual, empresas } = useEmpresa();
   const [loading, setLoading] = useState(true);
-  const [periodo, setPeriodo] = useState('mes-atual');
+  const [periodo, setPeriodo] = useState('tudo');
   const [dados, setDados] = useState<RelatorioData | null>(null);
   const [agingData, setAgingData] = useState<AgingData[]>([]);
   const [gastosPorFornecedor, setGastosPorFornecedor] = useState<GastoFornecedor[]>([]);
+  const [lancamentosDetalhe, setLancamentosDetalhe] = useState<MovimentoDetalhe[]>([]);
   const [receitasDetalhe, setReceitasDetalhe] = useState<MovimentoDetalhe[]>([]);
   const [despesasDetalhe, setDespesasDetalhe] = useState<MovimentoDetalhe[]>([]);
   const [porEmpresa, setPorEmpresa] = useState<EmpresaResumo[]>([]);
   const [periodoLabel, setPeriodoLabel] = useState('');
   const [escopoTodas, setEscopoTodas] = useState(false);
+  const [qtdLancamentos, setQtdLancamentos] = useState(0);
 
   useEffect(() => {
     void carregarDados();
@@ -266,9 +269,17 @@ export function Relatorios() {
       setDados(rel);
       setAgingData(rel.agingData);
       setGastosPorFornecedor(rel.gastosPorFornecedor);
+      setLancamentosDetalhe(rel.lancamentosDetalhe);
       setReceitasDetalhe(rel.receitasDetalhe);
       setDespesasDetalhe(rel.despesasDetalhe);
       setPorEmpresa(rel.porEmpresa);
+      setQtdLancamentos(rel.qtdLancamentos);
+
+      if (rel.qtdLancamentos === 0) {
+        toast.message('Nenhum lançamento no período', {
+          description: 'Tente "Todo período" ou amplie o filtro (Anual).',
+        });
+      }
     } catch (error) {
       console.error('❌ Erro ao carregar dados do relatório:', error);
       toast.error('Erro ao gerar relatório. Verifique a conexão com a API.');
@@ -310,9 +321,11 @@ export function Relatorios() {
       });
       setAgingData([]);
       setGastosPorFornecedor([]);
+      setLancamentosDetalhe([]);
       setReceitasDetalhe([]);
       setDespesasDetalhe([]);
       setPorEmpresa([]);
+      setQtdLancamentos(0);
     } finally {
       setLoading(false);
     }
@@ -439,6 +452,13 @@ export function Relatorios() {
             >
               Anual
             </Button>
+            <Button
+              variant={periodo === 'tudo' ? 'default' : 'outline'}
+              onClick={() => setPeriodo('tudo')}
+              size="sm"
+            >
+              Todo período
+            </Button>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -488,8 +508,9 @@ export function Relatorios() {
         )}
       </div>
 
-      <Tabs defaultValue="por-empresa" className="space-y-6">
-        <TabsList className="no-print grid grid-cols-3 lg:grid-cols-9 gap-2 h-auto">
+      <Tabs defaultValue="lancamentos" className="space-y-6">
+        <TabsList className="no-print grid grid-cols-3 lg:grid-cols-10 gap-2 h-auto">
+          <TabsTrigger value="lancamentos">Lançamentos</TabsTrigger>
           <TabsTrigger value="por-empresa">Por Empresa</TabsTrigger>
           <TabsTrigger value="receitas">Receitas</TabsTrigger>
           <TabsTrigger value="despesas">Despesas</TabsTrigger>
@@ -499,8 +520,192 @@ export function Relatorios() {
           <TabsTrigger value="kpis">KPIs</TabsTrigger>
           <TabsTrigger value="fornecedores">Fornecedores</TabsTrigger>
           <TabsTrigger value="inadimplencia">Inadimplência</TabsTrigger>
-          <TabsTrigger value="conclusao">Conclusão</TabsTrigger>
         </TabsList>
+
+        {/* ===== LANÇAMENTOS (RELATÓRIO PROFISSIONAL) ===== */}
+        <TabsContent value="lancamentos" className="space-y-6">
+          <Card className="border-primary/20">
+            <CardHeader className="border-b bg-muted/30">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-xl">
+                    <Receipt className="h-6 w-6 text-primary" />
+                    Relatório de Lançamentos
+                  </CardTitle>
+                  <CardDescription className="mt-2 space-y-1">
+                    <span className="block">Escopo: <strong>{escopoLabel}</strong></span>
+                    <span className="block">Período: <strong>{periodoLabel || '—'}</strong></span>
+                    <span className="block text-xs">
+                      Emitido em {new Date().toLocaleString('pt-BR')}
+                    </span>
+                  </CardDescription>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline" className="text-sm px-3 py-1">
+                    {qtdLancamentos} lançamentos
+                  </Badge>
+                  <Badge className="bg-green-500/15 text-green-600 border-green-500/30 text-sm px-3 py-1">
+                    Receitas{' '}
+                    {formatarMoeda(
+                      lancamentosDetalhe
+                        .filter((l) => l.tipo === 'Receita')
+                        .reduce((s, l) => s + l.valor, 0)
+                    )}
+                  </Badge>
+                  <Badge className="bg-red-500/15 text-red-500 border-red-500/30 text-sm px-3 py-1">
+                    Despesas{' '}
+                    {formatarMoeda(
+                      lancamentosDetalhe
+                        .filter((l) => l.tipo === 'Despesa')
+                        .reduce((s, l) => s + l.valor, 0)
+                    )}
+                  </Badge>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <Card className="bg-slate-50 dark:bg-slate-900/40">
+                  <CardContent className="pt-5">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Total lançamentos</p>
+                    <p className="text-2xl font-bold mt-1">{qtdLancamentos}</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-green-50 dark:bg-green-950/20 border-green-200/50">
+                  <CardContent className="pt-5">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Receitas</p>
+                    <p className="text-2xl font-bold text-green-600 mt-1">
+                      {formatarMoeda(
+                        lancamentosDetalhe
+                          .filter((l) => l.tipo === 'Receita')
+                          .reduce((s, l) => s + l.valor, 0)
+                      )}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-red-50 dark:bg-red-950/20 border-red-200/50">
+                  <CardContent className="pt-5">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Despesas</p>
+                    <p className="text-2xl font-bold text-red-500 mt-1">
+                      {formatarMoeda(
+                        lancamentosDetalhe
+                          .filter((l) => l.tipo === 'Despesa')
+                          .reduce((s, l) => s + l.valor, 0)
+                      )}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200/50">
+                  <CardContent className="pt-5">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Saldo (Rec − Desp)</p>
+                    <p className="text-2xl font-bold text-blue-600 mt-1">
+                      {formatarMoeda(
+                        lancamentosDetalhe
+                          .filter((l) => l.tipo === 'Receita')
+                          .reduce((s, l) => s + l.valor, 0) -
+                          lancamentosDetalhe
+                            .filter((l) => l.tipo === 'Despesa')
+                            .reduce((s, l) => s + l.valor, 0)
+                      )}
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {qtdLancamentos === 0 ? (
+                <Alert>
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>
+                    Nenhum lançamento encontrado neste período/escopo. Clique em{' '}
+                    <strong>Todo período</strong> ou confira se os lançamentos têm data e empresa
+                    preenchidos em <strong>Lançamentos</strong>.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead className="w-[40px]">#</TableHead>
+                        <TableHead>Data</TableHead>
+                        <TableHead>Empresa</TableHead>
+                        <TableHead>Tipo</TableHead>
+                        <TableHead>Descrição</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Forma / Fornecedor</TableHead>
+                        <TableHead className="text-right">Valor</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {lancamentosDetalhe.map((item, index) => (
+                        <TableRow key={item.id}>
+                          <TableCell className="text-muted-foreground text-xs">{index + 1}</TableCell>
+                          <TableCell className="whitespace-nowrap font-medium">
+                            {item.data
+                              ? item.data.split('-').reverse().join('/')
+                              : '-'}
+                          </TableCell>
+                          <TableCell>{item.empresaNome}</TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={
+                                item.tipo === 'Receita'
+                                  ? 'border-green-500/40 text-green-600'
+                                  : item.tipo === 'Despesa'
+                                    ? 'border-red-500/40 text-red-500'
+                                    : ''
+                              }
+                            >
+                              {item.tipo}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="max-w-[280px]">
+                            <span className="line-clamp-2">{item.descricao}</span>
+                          </TableCell>
+                          <TableCell>{item.status}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {[item.formaPagamento, item.terceiro].filter(Boolean).join(' · ') ||
+                              '-'}
+                          </TableCell>
+                          <TableCell
+                            className={`text-right font-semibold tabular-nums ${
+                              item.tipo === 'Receita'
+                                ? 'text-green-600'
+                                : item.tipo === 'Despesa'
+                                  ? 'text-red-500'
+                                  : ''
+                            }`}
+                          >
+                            {item.tipo === 'Despesa' ? '−' : '+'}
+                            {formatarMoeda(item.valor)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow className="bg-muted/40 font-bold border-t-2">
+                        <TableCell colSpan={7}>TOTAL DO PERÍODO</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatarMoeda(
+                            lancamentosDetalhe
+                              .filter((l) => l.tipo === 'Receita')
+                              .reduce((s, l) => s + l.valor, 0) -
+                              lancamentosDetalhe
+                                .filter((l) => l.tipo === 'Despesa')
+                                .reduce((s, l) => s + l.valor, 0)
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground print-only">
+                SisFinance — Relatório de Lançamentos · Documento gerado automaticamente
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* ===== POR EMPRESA ===== */}
         <TabsContent value="por-empresa" className="space-y-6">
