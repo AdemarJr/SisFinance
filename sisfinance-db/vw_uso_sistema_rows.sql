@@ -1,0 +1,1 @@
+INSERT INTO "public"."vw_uso_sistema" ("plano", "total_clientes", "clientes_ativos", "total_empresas") VALUES ('Enterprise', 1, 1, '4'), ('Gratuito', 0, 0, '0'), ('Iniciante', 0, 0, '0'), ('Profissional', 0, 0, '0');

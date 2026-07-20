@@ -63,9 +63,24 @@ export async function parseApiResponse(response: Response): Promise<unknown> {
   const text = await response.text();
   const trimmed = text.trimStart();
 
+  let parsed: unknown = null;
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  const apiError =
+    parsed && typeof parsed === 'object' && parsed !== null && 'error' in parsed
+      ? String((parsed as { error?: string }).error || '')
+      : '';
+
   if (response.status === 503 || response.status === 504) {
     throw new Error(
-      `Backend offline ou não iniciou (HTTP ${response.status}). ${BACKEND_HINT}`
+      apiError ||
+        `Backend offline ou não iniciou (HTTP ${response.status}). ${BACKEND_HINT}`
     );
   }
 
@@ -75,13 +90,15 @@ export async function parseApiResponse(response: Response): Promise<unknown> {
 
   if (!trimmed) return null;
 
+  if (parsed !== null) return parsed;
+
   try {
     return JSON.parse(text);
   } catch {
     throw new Error(
       response.ok
         ? 'Resposta inválida da API.'
-        : `API indisponível (HTTP ${response.status}). ${BACKEND_HINT}`
+        : apiError || `API indisponível (HTTP ${response.status}). ${BACKEND_HINT}`
     );
   }
 }

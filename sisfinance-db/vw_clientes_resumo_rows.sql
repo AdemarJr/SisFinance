@@ -1,0 +1,1 @@
+INSERT INTO "public"."vw_clientes_resumo" ("id", "nome_completo", "email", "status", "plano_nome", "plano_limite", "limite_atual", "total_empresas", "data_assinatura", "data_expiracao", "is_super_admin") VALUES ('b382d839-497a-4946-8f48-5864ca2f43b6', 'Super Admin', 'admin@sisfinance.com', 'Ativo', 'Enterprise', 999999, 999999, 4, '2026-07-05 14:06:56.6383+00', null, true);

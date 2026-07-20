@@ -1,0 +1,507 @@
+-- Gerado em: 2026-07-20 10:30:09
+-- Destino: PostgreSQL no Easypanel
+
+BEGIN;
+
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SET check_function_bodies = false;
+SET client_min_messages = warning;
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- -----------------------------------------------------------------------------
+-- Tabelas base (financeiro)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.empresas (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  nome text NOT NULL,
+  tipo text NOT NULL CHECK (tipo = ANY (ARRAY['Unidade Operacional'::text, 'Holding'::text, 'Franquia'::text])),
+  cnpj text,
+  endereco text,
+  responsavel text,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  cliente_sistema_id uuid,
+  CONSTRAINT empresas_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS public.contas_financeiras (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  nome text NOT NULL,
+  tipo text NOT NULL CHECK (tipo = ANY (ARRAY['Caixa'::text, 'Banco'::text, 'Cartão'::text])),
+  banco text,
+  agencia text,
+  conta text,
+  saldo_inicial numeric NOT NULL DEFAULT 0,
+  saldo_atual numeric NOT NULL DEFAULT 0,
+  data_inicio date NOT NULL DEFAULT CURRENT_DATE,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT contas_financeiras_pkey PRIMARY KEY (id),
+  CONSTRAINT contas_financeiras_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.clientes (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  nome text NOT NULL,
+  tipo text NOT NULL CHECK (tipo = ANY (ARRAY['Pessoa Física'::text, 'Pessoa Jurídica'::text])),
+  documento text,
+  contato text,
+  email text,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT clientes_pkey PRIMARY KEY (id),
+  CONSTRAINT clientes_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.fornecedores (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  nome text NOT NULL,
+  categoria text,
+  contato text,
+  email text,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT fornecedores_pkey PRIMARY KEY (id),
+  CONSTRAINT fornecedores_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.funcionarios (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  nome text NOT NULL,
+  cargo text NOT NULL CHECK (cargo = ANY (ARRAY['Garçom'::text, 'Atendente'::text, 'Freelancer'::text, 'Cozinheiro'::text, 'Gerente'::text, 'Outro'::text])),
+  tipo_contrato text NOT NULL CHECK (tipo_contrato = ANY (ARRAY['CLT'::text, 'Freelancer'::text, 'Diária'::text, 'Temporário'::text])),
+  documento text,
+  contato text,
+  salario_base numeric,
+  data_admissao date,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT funcionarios_pkey PRIMARY KEY (id),
+  CONSTRAINT funcionarios_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.pagamentos_extras (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  funcionario_id uuid NOT NULL,
+  conta_origem_id uuid NOT NULL,
+  tipo_extra text NOT NULL CHECK (tipo_extra = ANY (ARRAY['Gorjeta'::text, 'Diária'::text, 'Comissão'::text, 'Bonificação'::text, 'Adiantamento'::text])),
+  valor numeric NOT NULL CHECK (valor > 0::numeric),
+  data_pagamento date NOT NULL,
+  descricao text,
+  status text NOT NULL DEFAULT 'Pago'::text CHECK (status = ANY (ARRAY['Pendente'::text, 'Pago'::text])),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT pagamentos_extras_pkey PRIMARY KEY (id),
+  CONSTRAINT pagamentos_extras_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id),
+  CONSTRAINT pagamentos_extras_funcionario_id_fkey FOREIGN KEY (funcionario_id) REFERENCES public.funcionarios(id),
+  CONSTRAINT pagamentos_extras_conta_origem_id_fkey FOREIGN KEY (conta_origem_id) REFERENCES public.contas_financeiras(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.categorias_produtos (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  nome text NOT NULL,
+  descricao text,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  CONSTRAINT categorias_produtos_pkey PRIMARY KEY (id),
+  CONSTRAINT categorias_produtos_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.produtos (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  categoria_id uuid,
+  codigo text,
+  nome text NOT NULL,
+  unidade_medida text NOT NULL CHECK (unidade_medida = ANY (ARRAY['UN'::text, 'KG'::text, 'L'::text, 'CX'::text, 'PC'::text])),
+  estoque_minimo numeric NOT NULL DEFAULT 0,
+  estoque_atual numeric NOT NULL DEFAULT 0,
+  preco_custo_medio numeric NOT NULL DEFAULT 0,
+  preco_venda numeric,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT produtos_pkey PRIMARY KEY (id),
+  CONSTRAINT produtos_categoria_id_fkey FOREIGN KEY (categoria_id) REFERENCES public.categorias_produtos(id),
+  CONSTRAINT produtos_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.movimentacoes_estoque (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  produto_id uuid NOT NULL,
+  tipo_movimentacao text NOT NULL CHECK (tipo_movimentacao = ANY (ARRAY['Entrada'::text, 'Saída'::text, 'Ajuste'::text, 'Perda'::text])),
+  quantidade numeric NOT NULL,
+  preco_unitario numeric,
+  valor_total numeric,
+  data_movimentacao date NOT NULL DEFAULT CURRENT_DATE,
+  documento text,
+  observacao text,
+  created_at timestamptz DEFAULT now(),
+  CONSTRAINT movimentacoes_estoque_pkey PRIMARY KEY (id),
+  CONSTRAINT movimentacoes_estoque_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id),
+  CONSTRAINT movimentacoes_estoque_produto_id_fkey FOREIGN KEY (produto_id) REFERENCES public.produtos(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.categorias_receitas (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid,
+  nome text NOT NULL,
+  grupo text NOT NULL CHECK (grupo = ANY (ARRAY['Operacional'::text, 'Financeira'::text, 'Extraordinária'::text])),
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  CONSTRAINT categorias_receitas_pkey PRIMARY KEY (id),
+  CONSTRAINT categorias_receitas_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.categorias_despesas (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid,
+  nome text NOT NULL,
+  grupo text NOT NULL CHECK (grupo = ANY (ARRAY['Fixa'::text, 'Variável'::text, 'Investimento'::text])),
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  CONSTRAINT categorias_despesas_pkey PRIMARY KEY (id),
+  CONSTRAINT categorias_despesas_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.lancamentos (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  data date NOT NULL,
+  tipo text NOT NULL CHECK (tipo = ANY (ARRAY['Receita'::text, 'Despesa'::text, 'Transferência'::text])),
+  categoria_id uuid,
+  cliente_id uuid,
+  fornecedor_id uuid,
+  conta_origem_id uuid NOT NULL,
+  conta_destino_id uuid,
+  valor numeric NOT NULL CHECK (valor > 0::numeric),
+  forma_pagamento text,
+  status text NOT NULL CHECK (status = ANY (ARRAY['Previsto'::text, 'Realizado'::text, 'Pago'::text, 'Recebido'::text])),
+  descricao text,
+  observacoes text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT lancamentos_pkey PRIMARY KEY (id),
+  CONSTRAINT lancamentos_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id),
+  CONSTRAINT lancamentos_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id),
+  CONSTRAINT lancamentos_fornecedor_id_fkey FOREIGN KEY (fornecedor_id) REFERENCES public.fornecedores(id),
+  CONSTRAINT lancamentos_conta_origem_id_fkey FOREIGN KEY (conta_origem_id) REFERENCES public.contas_financeiras(id),
+  CONSTRAINT lancamentos_conta_destino_id_fkey FOREIGN KEY (conta_destino_id) REFERENCES public.contas_financeiras(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.contas_pagar (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  fornecedor_id uuid,
+  descricao text NOT NULL,
+  valor_total numeric NOT NULL CHECK (valor_total > 0::numeric),
+  valor_pago numeric NOT NULL DEFAULT 0,
+  data_emissao date NOT NULL,
+  data_vencimento date NOT NULL,
+  data_pagamento date,
+  status text NOT NULL CHECK (status = ANY (ARRAY['Em Aberto'::text, 'Pago'::text, 'Atrasado'::text, 'Parcial'::text])),
+  categoria_despesa_id uuid,
+  conta_origem_id uuid,
+  numero_parcela integer,
+  total_parcelas integer,
+  observacoes text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT contas_pagar_pkey PRIMARY KEY (id),
+  CONSTRAINT contas_pagar_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id),
+  CONSTRAINT contas_pagar_fornecedor_id_fkey FOREIGN KEY (fornecedor_id) REFERENCES public.fornecedores(id),
+  CONSTRAINT contas_pagar_categoria_despesa_id_fkey FOREIGN KEY (categoria_despesa_id) REFERENCES public.categorias_despesas(id),
+  CONSTRAINT contas_pagar_conta_origem_id_fkey FOREIGN KEY (conta_origem_id) REFERENCES public.contas_financeiras(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.contas_receber (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  cliente_id uuid,
+  descricao text NOT NULL,
+  valor_total numeric NOT NULL CHECK (valor_total > 0::numeric),
+  valor_recebido numeric NOT NULL DEFAULT 0,
+  data_emissao date NOT NULL,
+  data_vencimento date NOT NULL,
+  data_recebimento date,
+  status text NOT NULL CHECK (status = ANY (ARRAY['Previsto'::text, 'Recebido'::text, 'Atrasado'::text, 'Parcial'::text])),
+  categoria_receita_id uuid,
+  conta_destino_id uuid,
+  numero_parcela integer,
+  total_parcelas integer,
+  observacoes text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT contas_receber_pkey PRIMARY KEY (id),
+  CONSTRAINT contas_receber_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id),
+  CONSTRAINT contas_receber_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id),
+  CONSTRAINT contas_receber_categoria_receita_id_fkey FOREIGN KEY (categoria_receita_id) REFERENCES public.categorias_receitas(id),
+  CONSTRAINT contas_receber_conta_destino_id_fkey FOREIGN KEY (conta_destino_id) REFERENCES public.contas_financeiras(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.fechamentos_caixa (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  data_fechamento date NOT NULL,
+  conta_caixa_id uuid NOT NULL,
+  saldo_inicial numeric NOT NULL,
+  total_entradas numeric NOT NULL DEFAULT 0,
+  total_saidas numeric NOT NULL DEFAULT 0,
+  total_gorjetas numeric NOT NULL DEFAULT 0,
+  total_extras_pagos numeric NOT NULL DEFAULT 0,
+  saldo_final numeric NOT NULL,
+  saldo_esperado numeric NOT NULL,
+  diferenca numeric NOT NULL DEFAULT 0,
+  deposito_banco_id uuid,
+  valor_depositado numeric,
+  responsavel text,
+  observacoes text,
+  status text NOT NULL DEFAULT 'Aberto'::text CHECK (status = ANY (ARRAY['Aberto'::text, 'Fechado'::text, 'Conferido'::text])),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT fechamentos_caixa_pkey PRIMARY KEY (id),
+  CONSTRAINT fechamentos_caixa_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id),
+  CONSTRAINT fechamentos_caixa_conta_caixa_id_fkey FOREIGN KEY (conta_caixa_id) REFERENCES public.contas_financeiras(id),
+  CONSTRAINT fechamentos_caixa_deposito_banco_id_fkey FOREIGN KEY (deposito_banco_id) REFERENCES public.contas_financeiras(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.metas (
+  id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  empresa_id uuid NOT NULL,
+  mes integer NOT NULL CHECK (mes >= 1 AND mes <= 12),
+  ano integer NOT NULL,
+  meta_receita numeric,
+  meta_despesa numeric,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT metas_pkey PRIMARY KEY (id),
+  CONSTRAINT metas_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id)
+);
+
+CREATE TABLE IF NOT EXISTS public.kv_store_b1600651 (
+  key text NOT NULL,
+  value jsonb NOT NULL,
+  CONSTRAINT kv_store_b1600651_pkey PRIMARY KEY (key)
+);
+
+-- -----------------------------------------------------------------------------
+-- Tabelas SaaS / multi-tenant (adaptadas para Postgres puro, sem Supabase Auth)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS public.planos_assinatura (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  nome text NOT NULL UNIQUE CHECK (nome IN ('Gratuito', 'Iniciante', 'Profissional', 'Enterprise')),
+  limite_empresas integer NOT NULL,
+  preco_mensal numeric(10,2) NOT NULL DEFAULT 0,
+  descricao text,
+  recursos jsonb,
+  ativo boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.clientes_sistema (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  auth_user_id uuid,
+  nome_completo text NOT NULL,
+  email text NOT NULL UNIQUE,
+  telefone text,
+  documento text,
+  plano_id uuid NOT NULL REFERENCES public.planos_assinatura(id),
+  limite_empresas integer NOT NULL DEFAULT 1,
+  data_assinatura timestamptz DEFAULT now(),
+  data_expiracao timestamptz,
+  status text NOT NULL DEFAULT 'Ativo' CHECK (status IN ('Ativo', 'Suspenso', 'Cancelado')),
+  is_super_admin boolean NOT NULL DEFAULT false,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE public.empresas
+  DROP CONSTRAINT IF EXISTS empresas_cliente_sistema_id_fkey;
+ALTER TABLE public.empresas
+  ADD CONSTRAINT empresas_cliente_sistema_id_fkey
+  FOREIGN KEY (cliente_sistema_id) REFERENCES public.clientes_sistema(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS idx_clientes_sistema_email ON public.clientes_sistema(email);
+CREATE INDEX IF NOT EXISTS idx_clientes_sistema_auth_user_id ON public.clientes_sistema(auth_user_id);
+CREATE INDEX IF NOT EXISTS idx_clientes_sistema_plano_id ON public.clientes_sistema(plano_id);
+CREATE INDEX IF NOT EXISTS idx_empresas_cliente_sistema_id ON public.empresas(cliente_sistema_id);
+
+CREATE TABLE IF NOT EXISTS public.log_acoes (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  cliente_sistema_id uuid REFERENCES public.clientes_sistema(id) ON DELETE CASCADE,
+  acao text NOT NULL,
+  entidade text,
+  entidade_id uuid,
+  dados_anteriores jsonb,
+  dados_novos jsonb,
+  ip_address text,
+  user_agent text,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_log_acoes_cliente_sistema_id ON public.log_acoes(cliente_sistema_id);
+CREATE INDEX IF NOT EXISTS idx_log_acoes_created_at ON public.log_acoes(created_at DESC);
+
+-- -----------------------------------------------------------------------------
+-- Views (substituem os arquivos *_rows.sql de views exportados do Supabase)
+-- -----------------------------------------------------------------------------
+
+CREATE OR REPLACE VIEW public.saldos_por_conta AS
+SELECT
+  cf.id,
+  cf.empresa_id,
+  e.nome AS empresa_nome,
+  cf.nome AS conta_nome,
+  cf.tipo AS conta_tipo,
+  cf.banco,
+  cf.saldo_atual,
+  cf.ativo
+FROM public.contas_financeiras cf
+JOIN public.empresas e ON e.id = cf.empresa_id;
+
+CREATE OR REPLACE VIEW public.dashboard_resumo_empresa AS
+SELECT
+  e.id AS empresa_id,
+  e.nome AS empresa_nome,
+  (
+    SELECT sum(cf.saldo_atual)
+    FROM public.contas_financeiras cf
+    WHERE cf.empresa_id = e.id AND cf.ativo = true
+  ) AS saldo_total,
+  (
+    SELECT count(*)
+    FROM public.contas_pagar cp
+    WHERE cp.empresa_id = e.id AND cp.status = 'Atrasado'
+  ) AS contas_pagar_atrasadas,
+  (
+    SELECT count(*)
+    FROM public.contas_receber cr
+    WHERE cr.empresa_id = e.id AND cr.status = 'Atrasado'
+  ) AS contas_receber_atrasadas,
+  (
+    SELECT sum(cp.valor_total - cp.valor_pago)
+    FROM public.contas_pagar cp
+    WHERE cp.empresa_id = e.id
+      AND cp.status IN ('Em Aberto', 'Atrasado', 'Parcial')
+  ) AS total_a_pagar,
+  (
+    SELECT sum(cr.valor_total - cr.valor_recebido)
+    FROM public.contas_receber cr
+    WHERE cr.empresa_id = e.id
+      AND cr.status IN ('Previsto', 'Atrasado', 'Parcial')
+  ) AS total_a_receber,
+  (
+    SELECT sum(p.estoque_atual * p.preco_custo_medio)
+    FROM public.produtos p
+    WHERE p.empresa_id = e.id AND p.ativo = true
+  ) AS valor_estoque
+FROM public.empresas e;
+
+CREATE OR REPLACE VIEW public.vw_clientes_resumo AS
+SELECT
+  c.id,
+  c.nome_completo,
+  c.email,
+  c.status,
+  p.nome AS plano_nome,
+  p.limite_empresas AS plano_limite,
+  c.limite_empresas AS limite_atual,
+  (
+    SELECT count(*)
+    FROM public.empresas e
+    WHERE e.cliente_sistema_id = c.id AND e.ativo = true
+  ) AS total_empresas,
+  c.data_assinatura,
+  c.data_expiracao,
+  c.is_super_admin
+FROM public.clientes_sistema c
+JOIN public.planos_assinatura p ON c.plano_id = p.id
+ORDER BY c.created_at DESC;
+
+CREATE OR REPLACE VIEW public.vw_uso_sistema AS
+SELECT
+  p.nome AS plano,
+  count(c.id) AS total_clientes,
+  sum(CASE WHEN c.status = 'Ativo' THEN 1 ELSE 0 END) AS clientes_ativos,
+  sum((
+    SELECT count(*)
+    FROM public.empresas e
+    WHERE e.cliente_sistema_id = c.id AND e.ativo = true
+  )) AS total_empresas
+FROM public.planos_assinatura p
+LEFT JOIN public.clientes_sistema c ON c.plano_id = p.id
+GROUP BY p.id, p.nome
+ORDER BY p.preco_mensal;
+
+-- Desabilita RLS (API usa conexão direta no Postgres)
+ALTER TABLE public.planos_assinatura DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.clientes_sistema DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.empresas DISABLE ROW LEVEL SECURITY;
+
+
+-- -----------------------------------------------------------------------------
+-- Dados
+-- -----------------------------------------------------------------------------
+
+-- >>> planos_assinatura_rows.sql
+INSERT INTO "public"."planos_assinatura" ("id", "nome", "limite_empresas", "preco_mensal", "descricao", "recursos", "ativo", "created_at", "updated_at") VALUES ('570b3e3e-75d1-49d4-82ee-7f4cf9887cc5', 'Iniciante', 3, '97.00', 'Até 3 empresas, recursos intermediários', '["Dashboard completo","Até 3 empresas","Relatórios básicos","Suporte prioritário"]', true, '2026-07-05 14:06:47.405544+00', '2026-07-05 14:06:47.405544+00'), ('5b9680fd-57d9-4baf-bd5d-26853d5984d0', 'Enterprise', 999999, '997.00', 'Empresas ilimitadas, todos os recursos', '["Tudo do Profissional","Empresas ilimitadas","Customizações","Gerente de conta dedicado","SLA garantido"]', true, '2026-07-05 14:06:47.405544+00', '2026-07-05 14:06:47.405544+00'), ('7bf44cb6-fca0-4372-928a-1822bd0b51d9', 'Profissional', 10, '297.00', 'Até 10 empresas, recursos avançados', '["Dashboard avançado","Até 10 empresas","Relatórios avançados","API Access","Suporte 24/7"]', true, '2026-07-05 14:06:47.405544+00', '2026-07-05 14:06:47.405544+00'), ('ae6d8e9a-9487-4783-afd6-a1657a79635b', 'Gratuito', 1, '0.00', '1 empresa, recursos básicos', '["Dashboard básico","1 empresa","Suporte por email"]', true, '2026-07-05 14:06:47.405544+00', '2026-07-05 14:06:47.405544+00');
+
+-- >>> clientes_sistema_rows.sql
+INSERT INTO "public"."clientes_sistema" ("id", "auth_user_id", "nome_completo", "email", "telefone", "documento", "plano_id", "limite_empresas", "data_assinatura", "data_expiracao", "status", "is_super_admin", "created_at", "updated_at") VALUES ('b382d839-497a-4946-8f48-5864ca2f43b6', 'd56b113d-fbcb-450f-adb9-74f1551f99d2', 'Super Admin', 'admin@sisfinance.com', null, null, '5b9680fd-57d9-4baf-bd5d-26853d5984d0', 999999, '2026-07-05 14:06:56.6383+00', null, 'Ativo', true, '2026-07-05 14:06:56.6383+00', '2026-07-05 14:06:56.6383+00');
+
+-- >>> empresas_rows.sql
+INSERT INTO "public"."empresas" ("id", "nome", "tipo", "cnpj", "endereco", "responsavel", "ativo", "created_at", "updated_at", "cliente_sistema_id") VALUES ('5d6ffc06-2c55-4837-8348-ad080062fd9a', 'Centro de Distribuição', 'Holding', '18243617000101', '', '', true, '2026-02-20 13:52:04.62995+00', '2026-02-20 13:52:04.62995+00', 'b382d839-497a-4946-8f48-5864ca2f43b6'), ('948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'FUEGO', 'Unidade Operacional', '18243617000101', '', '', true, '2026-02-20 13:52:04.62995+00', '2026-02-20 13:52:04.62995+00', 'b382d839-497a-4946-8f48-5864ca2f43b6'), ('dc0e2d77-c932-41d0-bae6-72bcaa9bdbd0', 'COPACABANA', 'Unidade Operacional', '15209782000140', '', '', true, '2026-02-27 18:35:00.701653+00', '2026-02-27 18:35:00.701653+00', 'b382d839-497a-4946-8f48-5864ca2f43b6'), ('e03b7411-d6db-4ebe-925d-ed1fd13a4e1e', 'HOUSE 390', 'Unidade Operacional', '11933484000148', 'Rua Rio Purus 390', '', true, '2026-02-20 13:52:04.62995+00', '2026-02-20 13:52:04.62995+00', 'b382d839-497a-4946-8f48-5864ca2f43b6');
+
+-- >>> categorias_receitas_rows.sql
+INSERT INTO "public"."categorias_receitas" ("id", "empresa_id", "nome", "grupo", "ativo", "created_at") VALUES ('53fb4b92-25ad-414b-8b58-a1ac67e5d60a', null, 'Taxa de Serviço (10%)', 'Operacional', true, '2026-02-20 13:52:04.62995+00'), ('5c4c9231-e5f4-40e2-80ef-318121b5b295', null, 'Delivery', 'Operacional', true, '2026-02-20 13:52:04.62995+00'), ('bbadeb28-255f-4323-9f8e-6d46bf63470e', null, 'Vendas de Alimentos', 'Operacional', true, '2026-02-20 13:52:04.62995+00'), ('c80fa5d7-291c-492d-9763-df5ab9fac24c', null, 'Vendas de Bebidas', 'Operacional', true, '2026-02-20 13:52:04.62995+00');
+
+-- >>> categorias_despesas_rows.sql
+INSERT INTO "public"."categorias_despesas" ("id", "empresa_id", "nome", "grupo", "ativo", "created_at") VALUES ('05547fdf-02c6-4aaf-a0d3-27d05b760f21', null, 'Salários e Encargos', 'Fixa', true, '2026-02-20 13:52:04.62995+00'), ('190fb001-26e4-4166-87ed-7836edc61436', null, 'Matéria Prima', 'Variável', true, '2026-02-20 13:52:04.62995+00'), ('37b9d3d8-a3eb-48c9-8f78-3468f909e44b', null, 'Equipamentos', 'Investimento', true, '2026-02-20 13:52:04.62995+00'), ('638dacd9-f4e2-4853-8149-a731199d397d', null, 'Aluguel', 'Fixa', true, '2026-02-20 13:52:04.62995+00'), ('b85ce8be-3778-4b11-8cf2-2487ff31bcbd', null, 'Energia Elétrica', 'Fixa', true, '2026-02-20 13:52:04.62995+00'), ('f87b99d3-58f6-465c-8438-68cfce7d6ea1', null, 'Comissões e Gorjetas', 'Variável', true, '2026-02-20 13:52:04.62995+00');
+
+-- >>> categorias_produtos_rows.sql
+INSERT INTO "public"."categorias_produtos" ("id", "empresa_id", "nome", "descricao", "ativo", "created_at") VALUES ('070355a8-3aaf-4dec-bb83-d8bd3632db9d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Carnes', 'Carnes e proteínas', true, '2026-02-20 13:52:04.62995+00'), ('24c19334-f4ae-4326-b8a4-d93702277fee', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Descartáveis', 'Embalagens e descartáveis', true, '2026-02-20 13:52:04.62995+00'), ('557701aa-2c97-4e67-ba01-42428bb8f676', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Hortifruti', 'Frutas, legumes e verduras', true, '2026-02-20 13:52:04.62995+00'), ('9d990a20-ce80-476b-a044-ee9c6e3cef59', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Bebidas', 'Bebidas alcoólicas e não alcoólicas', true, '2026-02-20 13:52:04.62995+00');
+
+-- >>> contas_financeiras_rows.sql
+INSERT INTO "public"."contas_financeiras" ("id", "empresa_id", "nome", "tipo", "banco", "agencia", "conta", "saldo_inicial", "saldo_atual", "data_inicio", "ativo", "created_at", "updated_at") VALUES ('908b696d-248a-4932-86e8-c3614724cbac', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Dinheiro Espécie ', 'Banco', null, null, null, '31020.62', '31020.62', '2026-01-31', true, '2026-03-05 20:37:40.753421+00', '2026-03-05 20:37:40.753421+00'), ('eaf8d116-a798-46f6-afb5-818ec9be2acf', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Caixa econômica ', 'Banco', null, null, null, '482903.10', '292171.83', '2026-01-31', true, '2026-03-05 20:35:37.661862+00', '2026-05-05 20:56:08.434767+00'), ('ecf53023-dafb-4fb6-9959-b39aed57900a', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Banco Itaú', 'Banco', null, null, null, '185841.31', '185841.31', '2026-01-31', true, '2026-03-05 20:36:02.693928+00', '2026-03-05 20:36:02.693928+00');
+
+-- >>> fornecedores_rows.sql
+INSERT INTO "public"."fornecedores" ("id", "empresa_id", "nome", "categoria", "contato", "email", "ativo", "created_at", "updated_at") VALUES ('0cad26c4-7e47-4c17-ae06-5484088933f9', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'FH distribudora', 'Destilados', '', '', true, '2026-02-27 17:58:45.08029+00', '2026-02-27 17:58:45.08029+00'), ('0d843f95-baa7-4994-9311-f47ba21a784c', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'UENDEL PINHEIRO', 'CANTOR', '', '', true, '2026-04-29 17:17:23.641468+00', '2026-04-29 17:17:23.641468+00'), ('0ea9d360-f034-421f-8868-1062a36fb17d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Sabor de Portugal ', 'Destilados', '', '', true, '2026-02-27 18:05:06.568542+00', '2026-02-27 18:05:06.568542+00'), ('10ce441a-a764-4600-84d4-0cbeddceda3f', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'DANIEL TRINDADE', 'CANTOR', '', '', true, '2026-04-29 17:09:50.417252+00', '2026-04-29 17:09:50.417252+00'), ('12d92c95-a7cf-4b5a-83a0-14150a61bb0d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Mare / Magistral', 'Bebidas ', '', '', true, '2026-02-27 18:04:39.933339+00', '2026-02-27 18:04:39.933339+00'), ('19445082-51ec-42be-b269-ccc9d1e91395', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Ademar Jose', 'Sistema', '', '', true, '2026-03-06 20:07:04.337524+00', '2026-03-06 20:07:04.337524+00'), ('29da5316-63af-403d-98bb-18dd1bb50247', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'RA Contabeis', 'contabilidade', '', '', true, '2026-03-06 20:27:41.350368+00', '2026-03-06 20:27:41.350368+00'), ('2e9d586f-dc27-4b1f-9fbb-767f38d4c838', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Bonna Vitta', 'Açougue ', '', '', true, '2026-02-27 18:03:34.381224+00', '2026-02-27 18:03:34.381224+00'), ('42d3288b-8f2c-497b-8d19-99b0f0f37a77', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Ocidental Aurora', 'Comercio de Frios ', '', '', true, '2026-02-27 18:10:50.827422+00', '2026-02-27 18:10:50.827422+00'), ('459f2a8f-9ed4-4e11-bdfa-57cc536b867f', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'EBD', 'Energéticos / Destilados', '', '', true, '2026-02-27 18:01:27.975041+00', '2026-02-27 18:01:27.975041+00'), ('47ce76e9-3f3d-47cf-9766-1b1c702d0ddb', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'BMG FOOD', 'Açougue', '', '', true, '2026-03-06 21:20:45.110043+00', '2026-03-06 21:20:45.110043+00'), ('4ba9c707-c054-40ea-85c6-9802b14d3ee3', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Solides Tec.', 'Ponto Eletronico', '', '', true, '2026-03-09 21:12:19.203986+00', '2026-03-09 21:12:19.203986+00'), ('5a7511f0-85c0-4633-a08d-50f1d19afde1', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'FENIX TATICO', 'SEGURANÇA', '', '', true, '2026-04-29 17:10:08.038739+00', '2026-04-29 17:10:08.038739+00'), ('5ff1970b-e847-4e74-a494-55d7040f2ceb', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'PRESTIGIO TRANSPORTE', 'TRANSPORTE', '', '', true, '2026-04-29 17:10:46.614844+00', '2026-04-29 17:10:46.614844+00'), ('5ffc5dda-d42f-4d35-859c-421121d6c2f7', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Matos Montreal', 'Hortifruti', '', '', true, '2026-02-27 18:00:50.613451+00', '2026-02-27 18:00:50.613451+00'), ('6037a777-54ef-416c-8d27-7a939f5fca82', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Pãozinho DIDI', 'Pão de Alho', '', '', true, '2026-03-06 20:01:27.980009+00', '2026-03-06 20:01:27.980009+00'), ('63a2f91b-82ee-41c6-a186-3c3d7e023136', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'PREFIXO 92', 'CANTOR', '', '', true, '2026-04-29 17:17:34.250538+00', '2026-04-29 17:17:34.250538+00'), ('6524da18-f8c4-47b2-af32-4f8746766c4c', 'dc0e2d77-c932-41d0-bae6-72bcaa9bdbd0', 'Receita Federal', 'D.A.R.F', '', '', true, '2026-02-27 18:34:43.925814+00', '2026-02-27 18:34:43.925814+00'), ('652a8b77-90a7-4bb1-a561-dd77773e892f', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'ENDRYL CANARIO', 'CANTOR', '', '', true, '2026-04-29 17:12:37.106318+00', '2026-04-29 17:12:37.106318+00'), ('70f45639-60b4-43ee-b719-55f14dc6c8b7', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'FGTS', 'FGTS', '', '', true, '2026-03-09 21:16:50.692717+00', '2026-03-09 21:16:50.692717+00'), ('783772db-a1b4-448d-8195-5b4efbbea6a0', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'PRATA FILHO', 'CANTOR', '', '', true, '2026-04-29 17:11:50.237326+00', '2026-04-29 17:11:50.237326+00'), ('81873b6f-b4c4-477c-bb3d-89ac4549c4df', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Real Bebidas', 'aguas', '', '', true, '2026-03-05 21:00:57.969762+00', '2026-03-05 21:00:57.969762+00'), ('897656ee-7637-443a-b829-2a9d30f8464c', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Ambev', 'Bebidas', '9299999999', 'ambev@ambev.com.br', true, '2026-02-27 13:12:56.065362+00', '2026-02-27 13:12:56.065362+00'), ('9124cdf5-ed86-4b0b-9a81-0da489e99b1b', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Emops ', 'Controle de Pragas', '', '', true, '2026-02-27 18:01:59.401388+00', '2026-02-27 18:01:59.401388+00'), ('96b81255-ca4d-4c6c-88df-4d18e3ce4aac', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'ERICSON', 'CANTOR', '', '', true, '2026-04-29 17:16:52.049835+00', '2026-04-29 17:16:52.049835+00'), ('9b695c76-71a1-4569-aa93-660de0f0a8d9', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Queiroz ', 'Comercio de descartáveis', '', '', true, '2026-02-27 18:02:52.274975+00', '2026-02-27 18:02:52.274975+00'), ('a2484b77-dbcf-4d3b-8464-e13f2fdb2c19', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Amazonas Energia', 'Energia', '', '', true, '2026-02-27 17:59:03.105588+00', '2026-02-27 17:59:03.105588+00'), ('a405f8a9-b5c4-42f4-95f8-83f3eab087cd', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'JOTAERRE', 'DJ', '', '', true, '2026-04-29 17:11:23.721697+00', '2026-04-29 17:11:23.721697+00'), ('a80247ec-f1de-4fd8-a46d-356fe2079992', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Americana Bebidas', 'Bally', '', '', true, '2026-03-06 21:22:56.103555+00', '2026-03-06 21:22:56.103555+00'), ('b0603c14-187a-4250-8c6a-f54b0d2ca82a', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'JOAO VICTOR', 'CANTOR', '', '', true, '2026-04-29 17:12:12.112508+00', '2026-04-29 17:12:12.112508+00'), ('b30e5d49-eae7-4400-af1b-9378e04f7207', 'dc0e2d77-c932-41d0-bae6-72bcaa9bdbd0', 'Simples Nacional', 'D.A.S.N', '', '', true, '2026-02-27 18:12:49.711828+00', '2026-02-27 18:12:49.711828+00'), ('b79c0ad4-6d12-4f95-964e-608152988fc6', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Nortimoveis ', 'Bar fuego', '', '', true, '2026-03-06 20:29:40.568705+00', '2026-03-06 20:29:40.568705+00'), ('bedb5320-5b8d-4c91-a175-0067f5d7dda4', 'e03b7411-d6db-4ebe-925d-ed1fd13a4e1e', 'SEMEF', 'D.A.M', '', '', true, '2026-02-27 18:07:00.075572+00', '2026-02-27 18:07:00.075572+00'), ('c03e392d-e40d-4b2a-bb21-69e084a82cb3', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Amazônico Distribuidora', 'Mercearia ', '', '', true, '2026-02-27 18:07:55.602771+00', '2026-02-27 18:07:55.602771+00'), ('c31d07b5-550a-4120-a1b6-7a2f80080804', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'FUNCIONARIOS EXTRAS', 'FOLHA', '', '', true, '2026-04-29 17:19:06.195915+00', '2026-04-29 17:19:06.195915+00'), ('c425d3c5-51c0-4ac5-975d-7e4dd5783305', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Aguas de manaus', 'Aguas de manaus', '', '', true, '2026-03-05 20:54:05.05061+00', '2026-03-05 20:54:05.05061+00'), ('c47dd891-582c-46da-992b-c5a91bebb40b', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'JKF Carnes', 'Açougue', '', '', true, '2026-03-06 20:14:09.66102+00', '2026-03-06 20:14:09.66102+00'), ('c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Dunort Distribuidora ', 'Destilados / Material Limpeza', '', '', true, '2026-02-27 18:00:15.37148+00', '2026-02-27 18:00:15.37148+00'), ('c83f2508-7023-41a4-826e-c9d76817fea4', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Amazon Cleaner', 'Material limpeza', '', '', true, '2026-02-27 18:08:30.848616+00', '2026-02-27 18:08:30.848616+00'), ('ca5c12d8-2146-419d-8a9d-3fcee897281c', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'ROBSON LIMA', 'CANTOR', '', '', true, '2026-04-29 17:12:47.955481+00', '2026-04-29 17:12:47.955481+00'), ('cbe33336-4354-4019-88da-1ddea62a4be8', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'JOHN VEIGA', 'CANTOR', '', '', true, '2026-04-29 17:12:25.492052+00', '2026-04-29 17:12:25.492052+00'), ('d6f715ab-3289-4ff9-bb83-2e7cdedc4d88', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Masterfrigo', 'Açougue ', '', '', true, '2026-02-27 18:05:28.953856+00', '2026-02-27 18:05:28.953856+00'), ('e2b8b5f8-0ff4-4438-a7db-8334e6dc406c', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'RICARDO LESSA', 'OPERADOR DE SOM', '', '', true, '2026-04-29 17:10:31.602895+00', '2026-04-29 17:10:31.602895+00'), ('e2ce2618-e8b5-46ad-84d2-c0a011cc04fe', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'CACILDES YURI', 'CANTOR', '', '', true, '2026-04-29 17:13:13.383533+00', '2026-04-29 17:13:13.383533+00'), ('e35f19d7-8437-462a-b355-381b8810d5d2', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'MAZINHO', 'CANTOR', '', '', true, '2026-04-29 17:16:38.296672+00', '2026-04-29 17:16:38.296672+00'), ('e739c29a-8107-4d68-833d-d99e2e99a53a', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'MIKAEL LUCAS', 'CANTOR', '', '', true, '2026-04-29 17:11:39.408547+00', '2026-04-29 17:11:39.408547+00'), ('e873a438-5fdf-4f33-93fd-896fddddbc9e', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'RICARDO MENDES', 'CANTOR', '', '', true, '2026-04-29 17:12:58.391258+00', '2026-04-29 17:12:58.391258+00'), ('fabc3a72-b083-428e-a4fe-a2d5f30f4092', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'DANIEL BRUNO ', 'FOTOGRAFO', '', '', true, '2026-04-29 17:11:09.911759+00', '2026-04-29 17:11:09.911759+00'), ('ff02770d-9953-49b3-bb75-f02d5607436d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'JYOU GUERRA', 'CANTOR', '', '', true, '2026-04-29 17:16:21.301356+00', '2026-04-29 17:16:21.301356+00');
+
+-- >>> funcionarios_rows.sql
+INSERT INTO "public"."funcionarios" ("id", "empresa_id", "nome", "cargo", "tipo_contrato", "documento", "contato", "salario_base", "data_admissao", "ativo", "created_at", "updated_at") VALUES ('acbbe1a0-3d3a-45a4-ab58-5301812aaf6d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'Pedro Costa', 'Freelancer', 'Freelancer', null, null, '0.00', '2024-03-01', true, '2026-02-20 13:52:04.62995+00', '2026-02-20 13:52:04.62995+00');
+
+-- >>> produtos_rows.sql
+INSERT INTO "public"."produtos" ("id", "empresa_id", "categoria_id", "codigo", "nome", "unidade_medida", "estoque_minimo", "estoque_atual", "preco_custo_medio", "preco_venda", "ativo", "created_at", "updated_at") VALUES ('19453f01-d3e7-4b7a-895a-ed6ed6298d5b', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '070355a8-3aaf-4dec-bb83-d8bd3632db9d', 'P002', 'Cerveja Long Neck', 'UN', '100.00', '250.00', '2.50', '8.00', true, '2026-02-20 13:52:04.62995+00', '2026-02-20 13:52:04.62995+00'), ('19946bd9-1485-4aaf-842e-84f60a0d1c32', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '070355a8-3aaf-4dec-bb83-d8bd3632db9d', 'P004', 'Embalagem Marmitex', 'UN', '50.00', '120.00', '0.50', '0.00', true, '2026-02-20 13:52:04.62995+00', '2026-02-20 13:52:04.62995+00'), ('ac2d1725-7e1b-46d2-8fd0-0601d6f24722', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '070355a8-3aaf-4dec-bb83-d8bd3632db9d', 'P001', 'Picanha', 'KG', '5.00', '12.00', '45.00', '89.90', true, '2026-02-20 13:52:04.62995+00', '2026-02-20 13:52:04.62995+00'), ('e4545781-35f9-4a7c-a9e9-577a25c587e3', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '070355a8-3aaf-4dec-bb83-d8bd3632db9d', 'P003', 'Alface', 'UN', '10.00', '25.00', '1.20', '0.00', true, '2026-02-20 13:52:04.62995+00', '2026-02-20 13:52:04.62995+00');
+
+-- >>> lancamentos_rows.sql
+INSERT INTO "public"."lancamentos" ("id", "empresa_id", "data", "tipo", "categoria_id", "cliente_id", "fornecedor_id", "conta_origem_id", "conta_destino_id", "valor", "forma_pagamento", "status", "descricao", "observacoes", "created_at", "updated_at") VALUES ('083c1382-6951-4c2c-9299-4e720c88dfb2', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-08', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '560.53', '', 'Pago', '', null, '2026-03-06 20:19:18.262053+00', '2026-03-06 20:19:18.262053+00'), ('08b8a87c-c9b8-49d1-89a6-8b2264e5c685', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-13', 'Despesa', null, null, '897656ee-7637-443a-b829-2a9d30f8464c', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '11655.96', '', 'Pago', '', null, '2026-03-06 20:37:06.662184+00', '2026-03-06 20:37:06.662184+00'), ('0c82f466-94c8-45f7-8c91-4c8b1f903ced', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-27', 'Despesa', null, null, '897656ee-7637-443a-b829-2a9d30f8464c', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '7261.24', '', 'Pago', '', null, '2026-03-10 21:14:41.839753+00', '2026-03-10 21:14:41.839753+00'), ('0cebf298-ef69-4825-b99b-874b6e7e1940', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1160.53', '', 'Pago', '', null, '2026-03-06 19:59:26.375947+00', '2026-03-06 19:59:26.375947+00'), ('0d929ba3-c1a8-4840-9d47-48083b182201', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-20', 'Despesa', null, null, '6524da18-f8c4-47b2-af32-4f8746766c4c', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '2314.39', '', 'Pago', '', null, '2026-03-09 21:19:31.242536+00', '2026-03-09 21:19:31.242536+00'), ('0f0a77cb-3f38-4200-9749-6aa5e5245bfc', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-10', 'Despesa', null, null, 'b79c0ad4-6d12-4f95-964e-608152988fc6', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '9097.00', '', 'Pago', '', null, '2026-03-06 20:30:04.212295+00', '2026-03-06 20:30:04.212295+00'), ('1077400c-2cd0-4bcf-a1b0-eeddd11e34da', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-30', 'Despesa', null, null, '6524da18-f8c4-47b2-af32-4f8746766c4c', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '126.84', '', 'Pago', '', null, '2026-03-10 21:29:46.207585+00', '2026-03-10 21:29:46.207585+00'), ('10918d4d-8c20-40ac-bb00-2800bb609320', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, 'c03e392d-e40d-4b2a-bb21-69e084a82cb3', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1454.32', '', 'Pago', '', null, '2026-03-06 20:04:14.347033+00', '2026-03-06 20:04:14.347033+00'), ('1490003f-359e-4f7a-847e-ae0406b110ff', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-02', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '120.00', '', 'Pago', '', null, '2026-03-06 19:17:20.798186+00', '2026-03-06 19:17:20.798186+00'), ('14c49b0b-0e3c-45b8-88cd-28033e288934', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-03', 'Despesa', null, null, 'c83f2508-7023-41a4-826e-c9d76817fea4', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '668.00', '', 'Pago', '', null, '2026-03-06 19:54:24.85325+00', '2026-03-06 19:54:24.85325+00'), ('17327c2f-0407-493c-9664-e7e0f9a3ec0b', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-09', 'Despesa', null, null, '42d3288b-8f2c-497b-8d19-99b0f0f37a77', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1230.85', '', 'Pago', '', null, '2026-03-06 20:21:11.291337+00', '2026-03-06 20:21:11.291337+00'), ('17a08395-d0eb-4d6d-b22c-15ad5731919d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-16', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '373.90', '', 'Pago', '', null, '2026-03-09 21:14:09.243071+00', '2026-03-09 21:14:09.243071+00'), ('20a5cad4-3633-4d28-9b03-b7e0ded61d48', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-25', 'Despesa', null, null, 'a2484b77-dbcf-4d3b-8464-e13f2fdb2c19', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '377.42', '', 'Pago', '', null, '2026-03-05 20:57:33.317418+00', '2026-03-05 20:57:33.317418+00'), ('2229b251-9a21-47ac-a185-77863d1ab2f7', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-29', 'Despesa', null, null, 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '593.87', '', 'Pago', '', null, '2026-03-10 21:25:07.842436+00', '2026-03-10 21:25:07.842436+00'), ('229aa80d-7416-444b-ba15-553892193352', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-08', 'Despesa', null, null, '459f2a8f-9ed4-4e11-bdfa-57cc536b867f', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '6432.00', '', 'Pago', '', null, '2026-03-06 20:19:45.80675+00', '2026-03-06 20:19:45.80675+00'), ('23120a4e-60a8-436d-9650-0bfe61bc6a9b', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-23', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1883.80', '', 'Pago', '', null, '2026-03-09 21:26:25.985118+00', '2026-03-09 21:26:25.985118+00'), ('26316a3b-bd25-41b5-b111-9f11827f1020', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-14', 'Despesa', null, null, 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '863.77', '', 'Pago', '', null, '2026-03-06 21:18:18.808077+00', '2026-03-06 21:18:18.808077+00'), ('2718e97f-c8f7-4c34-befc-2f86a2267a7c', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-20', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '722.90', '', 'Pago', '', null, '2026-03-09 21:20:17.46645+00', '2026-03-09 21:20:17.46645+00'), ('2a653ca1-121d-4394-8aa1-ea6fd19b9c0c', 'dc0e2d77-c932-41d0-bae6-72bcaa9bdbd0', '2026-01-30', 'Despesa', null, null, 'b30e5d49-eae7-4400-af1b-9378e04f7207', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '3777.34', '', 'Pago', '', null, '2026-03-10 21:28:02.180763+00', '2026-03-10 21:28:02.180763+00'), ('2f192a64-95ba-4108-88fc-f52b510ab635', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-13', 'Despesa', null, null, 'a2484b77-dbcf-4d3b-8464-e13f2fdb2c19', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '101.18', '', 'Pago', '', null, '2026-03-05 20:56:05.466729+00', '2026-03-05 20:56:05.466729+00'), ('35774c38-b74f-4d8b-8aa2-fedd2356a907', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-22', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '155.05', '', 'Pago', '', null, '2026-03-09 21:25:18.871613+00', '2026-03-09 21:25:18.871613+00'), ('36b40d90-3907-4bc2-9db7-fd8f4e0f1433', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-20', 'Despesa', null, null, '459f2a8f-9ed4-4e11-bdfa-57cc536b867f', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '7272.00', '', 'Pago', '', null, '2026-03-09 21:20:40.45131+00', '2026-03-09 21:20:40.45131+00'), ('373e6469-a978-4829-8173-ba822bc3cf41', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-30', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1883.80', '', 'Pago', '', null, '2026-03-10 21:30:12.467996+00', '2026-03-10 21:30:12.467996+00'), ('39a50f46-81f6-45bc-b226-cae44c3f0b2b', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-16', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '247.60', '', 'Pago', '', null, '2026-03-09 21:14:29.440494+00', '2026-03-09 21:14:29.440494+00'), ('3a6e99be-c590-446e-a75a-4a77ee87feb4', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1442.65', '', 'Pago', '', null, '2026-03-06 19:58:39.630873+00', '2026-03-06 19:58:39.630873+00'), ('3ac3f058-8124-495a-8b29-599ef7c390f0', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-20', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '765.52', '', 'Pago', '', null, '2026-03-09 21:21:32.369828+00', '2026-03-09 21:21:32.369828+00'), ('3d79bbac-a299-402b-8895-39687f001d72', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-28', 'Despesa', null, null, '42d3288b-8f2c-497b-8d19-99b0f0f37a77', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1251.85', '', 'Pago', '', null, '2026-03-10 21:18:10.387446+00', '2026-03-10 21:18:10.387446+00'), ('3e3ed4aa-b855-493a-81bd-6eee8cee4d29', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-15', 'Despesa', null, null, '81873b6f-b4c4-477c-bb3d-89ac4549c4df', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '617.50', '', 'Pago', '', null, '2026-03-09 21:11:14.533521+00', '2026-03-09 21:11:14.533521+00'), ('3ea34ebd-df19-4a2e-a268-76e797354957', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-27', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '765.52', '', 'Pago', '', null, '2026-03-10 21:11:45.465227+00', '2026-03-10 21:11:45.465227+00'), ('3eaf03eb-fe2d-45ee-8fca-57bce80b3b5f', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-13', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '3431.86', '', 'Pago', '', null, '2026-03-06 20:36:13.505844+00', '2026-03-06 20:36:13.505844+00'), ('434b0620-0fe8-44d4-ab84-66bc7362e998', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-15', 'Despesa', null, null, 'a80247ec-f1de-4fd8-a46d-356fe2079992', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '432.00', '', 'Pago', '', null, '2026-03-09 21:10:21.385002+00', '2026-03-09 21:10:21.385002+00'), ('4970f2f4-1ed2-44be-b33e-e56b8f0df6ca', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-13', 'Despesa', null, null, '459f2a8f-9ed4-4e11-bdfa-57cc536b867f', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '7272.00', '', 'Pago', '', null, '2026-03-06 20:34:47.313868+00', '2026-03-06 20:34:47.313868+00'), ('4ab59ab0-8c20-4bdb-847b-2b7bd46b704f', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-02', 'Despesa', null, null, '81873b6f-b4c4-477c-bb3d-89ac4549c4df', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '307.50', '', 'Pago', '', null, '2026-03-06 19:15:17.298264+00', '2026-03-06 19:15:17.298264+00'), ('4adef60a-88ab-4f6f-a793-c54e1f10d2bf', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-28', 'Despesa', null, null, 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1289.42', '', 'Pago', '', null, '2026-03-10 21:18:38.064771+00', '2026-03-10 21:18:38.064771+00'), ('4b76cfaa-b3a8-4d53-81a1-19c74a610767', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-07', 'Despesa', null, null, '19445082-51ec-42be-b269-ccc9d1e91395', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '750.00', '', 'Pago', '', null, '2026-03-06 20:07:24.45544+00', '2026-03-06 20:07:24.45544+00'), ('4ccf6053-6f6f-4c9b-98c2-0eddf644e9aa', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-30', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '778.76', '', 'Pago', '', null, '2026-03-10 21:27:03.07387+00', '2026-03-10 21:27:03.07387+00'), ('4e781e1c-1bc2-4958-8329-fbc14debc112', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-23', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '364.28', '', 'Pago', '', null, '2026-03-09 21:28:25.540497+00', '2026-03-09 21:28:25.540497+00'), ('4ece1f0e-3ca8-4118-afd9-a86306236815', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-20', 'Despesa', null, null, '70f45639-60b4-43ee-b719-55f14dc6c8b7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '73.87', '', 'Pago', '', null, '2026-03-09 21:19:56.687232+00', '2026-03-09 21:19:56.687232+00'), ('4eded29e-5c4a-4d13-80a8-61fc91bb10f1', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-23', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1233.21', '', 'Pago', '', null, '2026-03-09 21:28:01.402449+00', '2026-03-09 21:28:01.402449+00'), ('51abf7e3-45fd-49cc-bf80-7beb2bd37333', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-26', 'Despesa', null, null, '897656ee-7637-443a-b829-2a9d30f8464c', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1080.99', '', 'Pago', '', null, '2026-03-10 21:05:59.311865+00', '2026-03-10 21:05:59.311865+00'), ('535938a8-9488-49f0-9202-4d393f946fa0', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-21', 'Despesa', null, null, 'c03e392d-e40d-4b2a-bb21-69e084a82cb3', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '701.07', '', 'Pago', '', null, '2026-03-09 21:22:12.001888+00', '2026-03-09 21:22:12.001888+00'), ('5435f923-30b9-4e98-bdb2-f7ef2be427bd', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-19', 'Despesa', null, null, 'c47dd891-582c-46da-992b-c5a91bebb40b', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '467.88', '', 'Pago', '', null, '2026-03-09 21:15:21.591115+00', '2026-03-09 21:15:21.591115+00'), ('5979060d-f092-481a-9258-c91fd8f22a10', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-30', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '2749.54', '', 'Pago', '', null, '2026-03-10 21:28:55.242183+00', '2026-03-10 21:28:55.242183+00'), ('5cc673df-a09a-4f0e-bca7-e712adf10516', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-12', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1689.68', '', 'Pago', '', null, '2026-03-06 20:32:26.926686+00', '2026-03-06 20:32:26.926686+00'), ('60ae8677-c4ec-432d-8c56-0a048eba2acc', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '3431.86', '', 'Pago', '', null, '2026-03-06 19:59:57.845052+00', '2026-03-06 19:59:57.845052+00'), ('61510668-2d71-427b-9bad-99fee46e018f', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-02', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '349.00', '', 'Pago', '', null, '2026-03-06 19:17:42.902355+00', '2026-03-06 19:17:42.902355+00'), ('6259ef1b-c33e-4c4d-a219-2116fef392da', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-14', 'Despesa', null, null, '47ce76e9-3f3d-47cf-9766-1b1c702d0ddb', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1236.08', '', 'Pago', '', null, '2026-03-06 21:21:10.167421+00', '2026-03-06 21:21:10.167421+00'), ('62b1787e-ab5a-4533-b20f-fa3d14ab3133', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-23', 'Despesa', null, null, '0ea9d360-f034-421f-8868-1062a36fb17d', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '2436.80', '', 'Pago', '', null, '2026-03-09 21:27:33.53903+00', '2026-03-09 21:27:33.53903+00'), ('62d9276b-bd27-43d0-ad23-cc05daa8aa29', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-22', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '85.00', '', 'Pago', '', null, '2026-03-09 21:24:53.663023+00', '2026-03-09 21:24:53.663023+00'), ('65c3702f-1664-44dc-a925-bd8859009b2f', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-12', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '942.53', '', 'Pago', '', null, '2026-03-06 20:32:49.391441+00', '2026-03-06 20:32:49.391441+00'), ('6719129e-e204-4841-b001-7530ebd728ab', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-28', 'Despesa', null, null, '897656ee-7637-443a-b829-2a9d30f8464c', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '163.86', '', 'Pago', '', null, '2026-03-10 21:16:16.838053+00', '2026-03-10 21:16:16.838053+00'), ('6b8267c1-2bd2-47ff-b959-8c6125536136', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-14', 'Despesa', null, null, 'c03e392d-e40d-4b2a-bb21-69e084a82cb3', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '366.50', '', 'Pago', '', null, '2026-03-06 21:18:49.601538+00', '2026-03-06 21:18:49.601538+00'), ('6f1a791c-343f-4777-ad0d-b8e7118df95b', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-27', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '753.45', '', 'Pago', '', null, '2026-03-10 21:12:10.911447+00', '2026-03-10 21:12:10.911447+00'), ('784b6f6a-76df-4fb7-be5e-2793b10f19eb', 'dc0e2d77-c932-41d0-bae6-72bcaa9bdbd0', '2026-01-10', 'Despesa', null, null, '29da5316-63af-403d-98bb-18dd1bb50247', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1400.00', '', 'Pago', '', null, '2026-03-06 20:28:44.575757+00', '2026-03-06 20:28:44.575757+00'), ('793a9ff8-aaf4-4054-b8b9-1a64ca032582', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-02', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '4281.28', '', 'Pago', '', null, '2026-03-06 19:53:08.475074+00', '2026-03-06 19:53:08.475074+00'), ('7b74afdf-46c0-4f49-9295-fc09e937ae78', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-13', 'Despesa', null, null, 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1179.83', '', 'Pago', '', null, '2026-03-06 20:36:36.741836+00', '2026-03-06 20:36:36.741836+00'), ('7e62a425-edb1-42a7-8a42-a4aacf9f8559', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-30', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1235.10', '', 'Pago', '', null, '2026-03-10 21:29:20.177083+00', '2026-03-10 21:29:20.177083+00'), ('81e27449-1369-48bc-8170-96cf5dd71169', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-12', 'Despesa', null, null, 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1224.89', '', 'Pago', '', null, '2026-03-06 20:31:36.572527+00', '2026-03-06 20:31:36.572527+00'), ('88417296-6592-4857-a74f-376995aedd8f', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-28', 'Despesa', null, null, 'c03e392d-e40d-4b2a-bb21-69e084a82cb3', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '701.07', '', 'Pago', '', null, '2026-03-10 21:17:20.382981+00', '2026-03-10 21:17:20.382981+00'), ('8894c9fe-e968-4092-85ec-f3ae5cd8ca68', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1179.84', '', 'Pago', '', null, '2026-03-06 20:02:39.667827+00', '2026-03-06 20:02:39.667827+00'), ('93f35c97-e99b-4c5a-a7d1-fbf225ed058c', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-09', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '349.00', '', 'Pago', '', null, '2026-03-06 20:21:37.312259+00', '2026-03-06 20:21:37.312259+00'), ('940f5ed6-4f8d-4977-b33e-40bcae917579', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-21', 'Despesa', null, null, 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '863.77', '', 'Pago', '', null, '2026-03-09 21:22:53.496991+00', '2026-03-09 21:22:53.496991+00'), ('97a559fd-2224-4049-acf7-54f7a20dfc6d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-16', 'Despesa', null, null, '0ea9d360-f034-421f-8868-1062a36fb17d', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '3132.80', '', 'Pago', '', null, '2026-03-09 21:13:43.975569+00', '2026-03-09 21:13:43.975569+00'), ('98901236-ff9d-4494-8c7c-997eee6d185c', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-09', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '373.90', '', 'Pago', '', null, '2026-03-06 20:22:05.143553+00', '2026-03-06 20:22:05.143553+00'), ('98a88c4d-00d8-4641-aede-cce1e50fa78e', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-26', 'Despesa', null, null, '897656ee-7637-443a-b829-2a9d30f8464c', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '664.04', '', 'Pago', '', null, '2026-03-10 21:06:24.533076+00', '2026-03-10 21:06:24.533076+00'), ('99172510-173b-4881-926b-caa051f088e3', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-23', 'Despesa', null, null, '12d92c95-a7cf-4b5a-83a0-14150a61bb0d', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '987.60', '', 'Pago', '', null, '2026-03-09 21:27:14.9178+00', '2026-03-09 21:27:14.9178+00'), ('9a3cb098-889a-4bbf-9fcc-4d000dcf94be', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-13', 'Despesa', null, null, '42d3288b-8f2c-497b-8d19-99b0f0f37a77', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '2072.03', '', 'Pago', '', null, '2026-03-06 20:35:24.70173+00', '2026-03-06 20:35:24.70173+00'), ('9abdc878-fe42-42f4-b782-0ac9347fba98', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-15', 'Despesa', null, null, '4ba9c707-c054-40ea-85c6-9802b14d3ee3', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '256.20', '', 'Pago', '', null, '2026-03-09 21:12:39.307078+00', '2026-03-09 21:12:39.307078+00'), ('9c633e7b-fd71-40f7-bf9b-a76c90d1c2e6', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-26', 'Despesa', null, null, '897656ee-7637-443a-b829-2a9d30f8464c', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '6050.73', '', 'Pago', '', null, '2026-03-10 21:05:21.933634+00', '2026-03-10 21:05:21.933634+00'), ('9e83b518-3d1a-4a1a-8288-e655f257d5c1', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-08', 'Despesa', null, null, 'c47dd891-582c-46da-992b-c5a91bebb40b', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '609.33', '', 'Pago', '', null, '2026-03-06 20:14:55.533023+00', '2026-03-06 20:14:55.533023+00'), ('a5b69513-f27d-4aa9-b2a7-89410d9d7d90', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-30', 'Despesa', null, null, '6524da18-f8c4-47b2-af32-4f8746766c4c', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '482.73', '', 'Pago', '', null, '2026-03-10 21:28:23.420476+00', '2026-03-10 21:28:23.420476+00'), ('a6bff01f-01bd-47e2-9793-553e6a6e30b6', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-14', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '361.66', '', 'Pago', '', null, '2026-03-06 21:20:21.754866+00', '2026-03-06 21:20:21.754866+00'), ('a7ba5d47-f900-437a-8548-a03f1f150392', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-07', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '776.12', '', 'Pago', '', null, '2026-03-06 20:06:23.016372+00', '2026-03-06 20:06:23.016372+00'), ('a805075b-532d-4183-b8fb-1dacd76c1edb', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-14', 'Despesa', null, null, '12d92c95-a7cf-4b5a-83a0-14150a61bb0d', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '204.50', '', 'Pago', '', null, '2026-03-06 21:19:18.855357+00', '2026-03-06 21:19:18.855357+00'), ('a96c0d2d-7b25-4bba-accc-9b26eb49e0cc', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-21', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '361.67', '', 'Pago', '', null, '2026-03-09 21:22:32.18603+00', '2026-03-09 21:22:32.18603+00'), ('a9ba9b2c-58ec-46f4-89a1-02031b624ce3', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-28', 'Despesa', null, null, 'c03e392d-e40d-4b2a-bb21-69e084a82cb3', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '506.40', '', 'Pago', '', null, '2026-03-10 21:16:55.901507+00', '2026-03-10 21:16:55.901507+00'), ('aab07c84-ffba-463c-b1df-8cae748fec35', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-09', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '296.28', '', 'Pago', '', null, '2026-03-06 20:22:30.60612+00', '2026-03-06 20:22:30.60612+00'), ('aad497b6-d68d-491c-9515-b3e286ab9794', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-12', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '376.84', '', 'Pago', '', null, '2026-03-06 20:32:03.000459+00', '2026-03-06 20:32:03.000459+00'), ('ac103bca-1b7c-4a87-892f-0943999d7d85', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-07', 'Despesa', null, null, '12d92c95-a7cf-4b5a-83a0-14150a61bb0d', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '122.40', '', 'Pago', '', null, '2026-03-06 20:05:50.039416+00', '2026-03-06 20:05:50.039416+00'), ('ad1c10a9-e15e-48f8-ae1a-df2488f2008a', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-30', 'Despesa', null, null, '6524da18-f8c4-47b2-af32-4f8746766c4c', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '140.93', '', 'Pago', '', null, '2026-03-10 21:31:05.19406+00', '2026-03-10 21:31:05.19406+00'), ('b0c4586a-27cc-475d-af87-15672ea02c7d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-15', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '633.84', '', 'Pago', '', null, '2026-03-09 21:10:46.715966+00', '2026-03-09 21:10:46.715966+00'), ('b1e80955-8804-42c9-9847-de396b0eda9d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-19', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '376.84', '', 'Pago', '', null, '2026-03-09 21:15:42.305129+00', '2026-03-09 21:15:42.305129+00'), ('b2191fd4-dc2e-4333-8a2a-2a8646ca74a8', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-20', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '830.80', '', 'Pago', '', null, '2026-03-09 21:21:09.15767+00', '2026-03-09 21:21:09.15767+00'), ('b344569b-33ea-4e80-b7b4-99e5968af6e4', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '830.80', '', 'Pago', '', null, '2026-03-06 20:03:44.786424+00', '2026-03-06 20:03:44.786424+00'), ('b6762cf1-79f0-4d8d-b9fb-2004575add59', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-02', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '372.00', '', 'Pago', '', null, '2026-03-06 19:16:21.975096+00', '2026-03-06 19:16:21.975096+00'), ('bc4761a4-5143-4088-8e1c-38bac91865a6', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-29', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '485.75', '', 'Pago', '', null, '2026-03-10 21:24:18.492924+00', '2026-03-10 21:24:18.492924+00'), ('bda7d939-bce5-4d5e-a002-fcda4c92c590', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-22', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '185.64', '', 'Pago', '', null, '2026-03-09 21:25:37.518032+00', '2026-03-09 21:25:37.518032+00'), ('bf00f25f-644c-40d1-9146-f45503ca178e', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, '12d92c95-a7cf-4b5a-83a0-14150a61bb0d', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '696.00', '', 'Pago', '', null, '2026-03-06 20:03:11.996241+00', '2026-03-06 20:03:11.996241+00'), ('c4d5f863-97c4-4f43-9d25-101b807454d8', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-27', 'Despesa', null, null, '9124cdf5-ed86-4b0b-9a81-0da489e99b1b', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '380.00', '', 'Pago', '', null, '2026-03-10 21:13:04.846576+00', '2026-03-10 21:13:04.846576+00'), ('cb0ea4ef-25b2-4675-8658-99e01777cc5a', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-27', 'Despesa', null, null, '2e9d586f-dc27-4b1f-9fbb-767f38d4c838', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '420.00', '', 'Pago', '', null, '2026-03-10 21:15:04.033284+00', '2026-03-10 21:15:04.033284+00'), ('d19efbc1-d206-4bc3-a9b8-4c1ee728c10e', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-30', 'Despesa', null, null, '12d92c95-a7cf-4b5a-83a0-14150a61bb0d', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '701.25', '', 'Pago', '', null, '2026-03-10 21:30:37.571021+00', '2026-03-10 21:30:37.571021+00'), ('d2aa536c-5c91-40cb-af8d-7021153e8905', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-02-02', 'Despesa', null, null, '10ce441a-a764-4600-84d4-0cbeddceda3f', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '5712.02', '', 'Pago', 'banda', null, '2026-05-05 20:43:53.997744+00', '2026-05-05 20:43:53.997744+00'), ('d3ed47d6-94c5-4d33-b1b4-79e53b7ce72a', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, 'c425d3c5-51c0-4ac5-975d-7e4dd5783305', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '533.61', '', 'Pago', '', null, '2026-03-05 20:55:25.477845+00', '2026-03-05 20:55:25.477845+00'), ('d8dc0ab9-f5d7-4cc0-beef-26f9e505a65d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, '42d3288b-8f2c-497b-8d19-99b0f0f37a77', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '658.80', '', 'Pago', '', null, '2026-03-06 20:00:39.217241+00', '2026-03-06 20:00:39.217241+00'), ('df8783cc-b452-4719-83e8-718b1a4737f1', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-27', 'Despesa', null, null, '459f2a8f-9ed4-4e11-bdfa-57cc536b867f', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '7272.00', '', 'Pago', '', null, '2026-03-10 21:12:44.131229+00', '2026-03-10 21:12:44.131229+00'), ('df95eeb8-eff5-4dac-a75d-8705dbaf200d', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-02', 'Despesa', null, null, 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1158.97', '', 'Pago', '', null, '2026-03-06 19:52:26.532766+00', '2026-03-06 19:52:26.532766+00'), ('e0a6b77b-175e-49ca-b310-c6000b6ab49f', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-02', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '236.50', '', 'Pago', '', null, '2026-03-06 19:16:57.258537+00', '2026-03-06 19:16:57.258537+00'), ('e540c059-df9e-4ff3-be00-4694d9f172e4', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-10', 'Despesa', null, null, '29da5316-63af-403d-98bb-18dd1bb50247', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1400.00', '', 'Pago', '', null, '2026-03-06 20:28:21.854012+00', '2026-03-06 20:28:21.854012+00'), ('e7215f86-4eb4-4989-9521-db20546015e2', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-30', 'Despesa', null, null, 'c83f2508-7023-41a4-826e-c9d76817fea4', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '408.00', '', 'Pago', '', null, '2026-03-10 21:27:25.177179+00', '2026-03-10 21:27:25.177179+00'), ('e8f242e0-4cdd-47bb-afa6-496b9c6eefe7', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-29', 'Despesa', null, null, '5ffc5dda-d42f-4d35-859c-421121d6c2f7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '85.00', '', 'Pago', '', null, '2026-03-10 21:24:43.033916+00', '2026-03-10 21:24:43.033916+00'), ('ed8da309-d5de-4344-b7bc-94b54df9bebf', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-22', 'Despesa', null, null, 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '593.88', '', 'Pago', '', null, '2026-03-09 21:24:28.069905+00', '2026-03-09 21:24:28.069905+00'), ('f15824a4-cf94-4117-88c7-6215c6ca34fc', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-20', 'Despesa', null, null, '70f45639-60b4-43ee-b719-55f14dc6c8b7', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '2093.55', '', 'Pago', '', null, '2026-03-09 21:17:09.679547+00', '2026-03-09 21:17:09.679547+00'), ('f23142d9-f1a1-4616-8987-717a61b11177', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-28', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '296.60', '', 'Pago', '', null, '2026-03-10 21:15:55.689698+00', '2026-03-10 21:15:55.689698+00'), ('f323b0ec-4093-4e54-8eef-cb6c99efbea7', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, 'c425d3c5-51c0-4ac5-975d-7e4dd5783305', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '481.45', '', 'Pago', '', null, '2026-03-05 20:54:38.437705+00', '2026-03-05 20:54:38.437705+00'), ('f541fc8d-ff6d-4a4a-9fed-5db21a1976e0', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, 'c69d4aa8-c7ab-4143-ae2b-fa51011b70e9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1442.65', '', 'Pago', '', null, '2026-03-06 19:58:39.519283+00', '2026-03-06 19:58:39.519283+00'), ('f6df65bf-0640-471e-a7eb-1b8cece7987c', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-27', 'Despesa', null, null, '9b695c76-71a1-4569-aa93-660de0f0a8d9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '395.40', '', 'Pago', '', null, '2026-03-10 21:14:10.371245+00', '2026-03-10 21:14:10.371245+00'), ('f84ed4d7-a27b-42fd-b3e1-51a8545856e0', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-13', 'Despesa', null, null, '0cad26c4-7e47-4c17-ae06-5484088933f9', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '830.80', '', 'Pago', '', null, '2026-03-06 20:35:49.260493+00', '2026-03-06 20:35:49.260493+00'), ('fae3ced8-e160-40ae-ad00-c81bf8420b4f', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-28', 'Despesa', null, null, 'c83f2508-7023-41a4-826e-c9d76817fea4', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '2110.00', '', 'Pago', '', null, '2026-03-10 21:17:45.001314+00', '2026-03-10 21:17:45.001314+00'), ('fb772416-de2e-447e-9328-edf68557bddf', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-26', 'Despesa', null, null, 'bedb5320-5b8d-4c91-a175-0067f5d7dda4', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1116.46', '', 'Pago', '', null, '2026-03-10 21:07:04.468221+00', '2026-03-10 21:07:04.468221+00'), ('fbe27235-9421-41be-bafc-ae6ffb31bc2a', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-09', 'Despesa', null, null, 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '1158.98', '', 'Pago', '', null, '2026-03-06 20:20:43.572841+00', '2026-03-06 20:20:43.572841+00'), ('fd6ca8a1-404a-4a0a-838a-6eae172bd376', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-09', 'Despesa', null, null, 'c03e392d-e40d-4b2a-bb21-69e084a82cb3', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '343.00', '', 'Pago', '', null, '2026-03-06 20:23:08.043825+00', '2026-03-06 20:23:08.043825+00'), ('feab289e-028c-4d47-9145-7a554ed38412', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-13', 'Despesa', null, null, 'a2484b77-dbcf-4d3b-8464-e13f2fdb2c19', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '8032.49', '', 'Pago', '', null, '2026-03-05 20:56:41.0719+00', '2026-03-05 20:56:41.0719+00'), ('fee96cd7-4f22-442d-a83c-258c3e0b1bb8', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '2026-01-06', 'Despesa', null, null, '6037a777-54ef-416c-8d27-7a939f5fca82', 'eaf8d116-a798-46f6-afb5-818ec9be2acf', null, '250.00', '', 'Pago', '', null, '2026-03-06 20:02:00.458429+00', '2026-03-06 20:02:00.458429+00');
+
+-- >>> contas_pagar_rows.sql
+INSERT INTO "public"."contas_pagar" ("id", "empresa_id", "fornecedor_id", "descricao", "valor_total", "valor_pago", "data_emissao", "data_vencimento", "data_pagamento", "status", "categoria_despesa_id", "conta_origem_id", "numero_parcela", "total_parcelas", "observacoes", "created_at", "updated_at") VALUES ('5ac87d25-c3f2-463e-8e3f-51df6f7a86b4', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', 'd6f715ab-3289-4ff9-bb83-2e7cdedc4d88', 'masterfrigo', '1038.24', '1038.24', '2026-02-11', '2026-03-04', '2026-03-05', 'Pago', null, null, null, null, null, '2026-03-03 21:48:26.818445+00', '2026-03-03 21:48:26.818445+00'), ('7ab38439-d335-48b2-90fe-6e5bba4f6f21', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '0cad26c4-7e47-4c17-ae06-5484088933f9', 'FH', '727.46', '727.46', '2026-02-10', '2026-03-04', '2026-03-05', 'Pago', null, null, null, null, null, '2026-03-03 21:49:39.89717+00', '2026-03-03 21:49:39.89717+00'), ('caf1b376-a479-4606-8498-56a9efa5fe05', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '459f2a8f-9ed4-4e11-bdfa-57cc536b867f', 'EBD', '19307.60', '19307.60', '2026-02-11', '2026-03-04', '2026-03-05', 'Pago', null, null, null, null, null, '2026-03-03 21:50:15.72478+00', '2026-03-03 21:50:15.72478+00'), ('cf74552c-e769-487e-a8c9-b6bec29162db', '948cc730-99ba-4b86-b6b1-ef9b58fc44a2', '42d3288b-8f2c-497b-8d19-99b0f0f37a77', 'Aurora', '586.47', '586.47', '2026-02-11', '2026-03-04', '2026-03-05', 'Pago', null, null, null, null, null, '2026-03-03 21:50:59.046704+00', '2026-03-03 21:50:59.046704+00');
+
+
+COMMIT;
+
+SELECT 'Import concluído' AS status,
+  (SELECT count(*) FROM public.planos_assinatura) AS planos,
+  (SELECT count(*) FROM public.clientes_sistema) AS clientes_sistema,
+  (SELECT count(*) FROM public.empresas) AS empresas,
+  (SELECT count(*) FROM public.lancamentos) AS lancamentos,
+  (SELECT count(*) FROM public.fornecedores) AS fornecedores;
