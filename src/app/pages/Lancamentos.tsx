@@ -9,6 +9,7 @@ import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useEmpresa } from '../contexts/EmpresaContext';
+import { formatarData, toDateInputValue } from '../../lib/formatters';
 
 // Helper para obter data local no formato YYYY-MM-DD
 const getLocalDateString = (date: Date = new Date()): string => {
@@ -16,15 +17,6 @@ const getLocalDateString = (date: Date = new Date()): string => {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-};
-
-// Helper para formatar data para exibição
-const formatDateForDisplay = (dateString: string): string => {
-  if (!dateString) return '-';
-  // Parse a data como local, não UTC
-  const [year, month, day] = dateString.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-  return date.toLocaleDateString('pt-BR');
 };
 
 export function Lancamentos() {
@@ -170,7 +162,7 @@ export function Lancamentos() {
     setEditingId(lancamento.id);
     setFormData({
       empresa_id: lancamento.empresa_id ? String(lancamento.empresa_id) : '',
-      data: lancamento.data,
+      data: toDateInputValue(lancamento.data),
       tipo: lancamento.tipo,
       valor: lancamento.valor.toString(),
       descricao: lancamento.descricao || '',
@@ -318,7 +310,7 @@ export function Lancamentos() {
               {lancamentosFiltrados.map((lancamento) => (
                 <tr key={lancamento.id} className="hover:bg-muted/30 transition-colors">
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                    {formatDateForDisplay(lancamento.data)}
+                    {formatarData(lancamento.data)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span

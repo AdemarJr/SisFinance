@@ -58,3 +58,25 @@ export function formatarInteiro(value: number | string): string {
 export function asNumber(value: unknown): number {
   return toFiniteNumber(value);
 }
+
+/**
+ * Formata data (YYYY-MM-DD ou ISO) para exibição pt-BR (dd/mm/aaaa).
+ * Evita Invalid Date quando o Postgres/API devolve timestamp ISO.
+ */
+export function formatarData(value: string | Date | null | undefined): string {
+  if (!value) return '-';
+  const raw = value instanceof Date ? value.toISOString() : String(value);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return '-';
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleDateString('pt-BR');
+}
+
+/** Normaliza para input type="date" (YYYY-MM-DD). */
+export function toDateInputValue(value: string | Date | null | undefined): string {
+  if (!value) return '';
+  const raw = value instanceof Date ? value.toISOString() : String(value);
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : '';
+}
