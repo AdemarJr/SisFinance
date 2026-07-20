@@ -38,30 +38,44 @@ export function ContasPagar() {
   const loadData = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     try {
-      const { data: contasData } = await db
-        .from('contas_pagar')
-        .select('*, fornecedores(nome)')
-        .order('data_vencimento', { ascending: true });
-
-      setContas(contasData || []);
-
       const { data: fornecedoresData } = await db
         .from('fornecedores')
         .select('*')
         .eq('ativo', true);
 
-      setFornecedores(fornecedoresData || []);
+      const fornecedoresList = fornecedoresData || [];
+      setFornecedores(fornecedoresList);
 
-      // Carregar funcionários
+      const { data: contasData, error: contasError } = await db
+        .from('contas_pagar')
+        .select('*')
+        .order('data_vencimento', { ascending: true });
+
+      if (contasError) throw contasError;
+
+      const fornecedorById = new Map(fornecedoresList.map((f: any) => [f.id, f]));
+      setContas(
+        (contasData || []).map((c: any) => ({
+          ...c,
+          fornecedores: c.fornecedor_id
+            ? { nome: fornecedorById.get(c.fornecedor_id)?.nome }
+            : null,
+        }))
+      );
+
       const { data: funcionariosData } = await db
         .from('funcionarios')
         .select('*')
         .eq('ativo', true);
 
       setFuncionarios(funcionariosData || []);
-      
-      // Atualizar status de contas atrasadas
-      await db.rpc('atualizar_status_atrasados');
+
+      // RPC opcional (pode não existir no Postgres Easypanel)
+      try {
+        await db.rpc('atualizar_status_atrasados');
+      } catch {
+        // ignora se a função ainda não foi criada
+      }
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
       toast.error('Erro ao carregar contas a pagar');

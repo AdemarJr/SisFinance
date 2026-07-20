@@ -113,18 +113,15 @@ export function Admin() {
       if (planosError) throw planosError;
       setPlanos(planosData || []);
 
-      // Carregar clientes com contagem de empresas
       const { data: clientesData, error: clientesError } = await db
         .from('clientes_sistema')
-        .select(`
-          *,
-          plano:planos_assinatura(*)
-        `)
+        .select('*')
         .order('created_at', { ascending: false });
 
       if (clientesError) throw clientesError;
 
-      // Carregar total de empresas para cada cliente
+      const planoById = new Map((planosData || []).map((p: Plano) => [p.id, p]));
+
       const clientesComTotal = await Promise.all(
         (clientesData || []).map(async (cliente: ClienteSistema) => {
           const { data: empresasData } = await db
@@ -135,6 +132,7 @@ export function Admin() {
 
           return {
             ...cliente,
+            plano: planoById.get(cliente.plano_id),
             total_empresas: empresasData?.length || 0,
           };
         })

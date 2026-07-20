@@ -31,27 +31,40 @@ export function ContasReceber() {
   const loadData = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     try {
-      const { data: contasData } = await db
-        .from('contas_receber')
-        .select('*, clientes(nome)')
-        .order('data_vencimento', { ascending: true });
-
-      setContas(contasData || []);
-
       const { data: clientesData } = await db
         .from('clientes')
         .select('*')
         .eq('ativo', true);
 
-      setClientes(clientesData || []);
+      const clientesList = clientesData || [];
+      setClientes(clientesList);
+
+      const { data: contasData, error: contasError } = await db
+        .from('contas_receber')
+        .select('*')
+        .order('data_vencimento', { ascending: true });
+
+      if (contasError) throw contasError;
+
+      const clienteById = new Map(clientesList.map((c: any) => [c.id, c]));
+      setContas(
+        (contasData || []).map((c: any) => ({
+          ...c,
+          clientes: c.cliente_id ? { nome: clienteById.get(c.cliente_id)?.nome } : null,
+        }))
+      );
       
       const { data: empresasData } = await db.from('empresas').select('*');
       if (empresasData && empresasData.length > 0) {
         setFormData({ ...formData, empresa_id: empresaSelecionada });
       }
 
-      // Atualizar status de contas atrasadas
-      await db.rpc('atualizar_status_atrasados');
+      // Atualizar status de contas atrasadas (RPC opcional no Postgres)
+      try {
+        await db.rpc('atualizar_status_atrasados');
+      } catch {
+        // função pode não existir no Easypanel
+      }
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
       toast.error('Erro ao carregar contas a receber');

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { db, isUsingMockData } from '../../lib/db';
-import { formatarMoeda, formatarNumero } from '../../lib/formatters';
+import { formatarMoeda, formatarNumero, asNumber } from '../../lib/formatters';
 import {
   TrendingUp,
   TrendingDown,
@@ -96,25 +96,36 @@ export default function DashboardMulti() {
     // Calcular saldo total
     const saldo = contasFiltradas
       .filter((c: any) => c.ativo)
-      .reduce((sum: number, c: any) => sum + c.saldo_atual, 0);
+      .reduce((sum: number, c: any) => sum + asNumber(c.saldo_atual), 0);
     setSaldoTotal(saldo);
 
     // Calcular valor do estoque
     const estoque = produtosFiltrados
       .filter((p: any) => p.ativo)
-      .reduce((sum: number, p: any) => sum + (p.estoque_atual * p.preco_custo_medio), 0);
+      .reduce(
+        (sum: number, p: any) =>
+          sum + asNumber(p.estoque_atual) * asNumber(p.preco_custo_medio),
+        0
+      );
     setValorEstoque(estoque);
 
     // Calcular total a pagar
     const aPagar = contasPagarFiltradas
       .filter((c: any) => ['Em Aberto', 'Atrasado', 'Parcial'].includes(c.status))
-      .reduce((sum: number, c: any) => sum + (c.valor_total - c.valor_pago), 0);
+      .reduce(
+        (sum: number, c: any) => sum + (asNumber(c.valor_total) - asNumber(c.valor_pago)),
+        0
+      );
     setTotalAPagar(aPagar);
 
     // Calcular total a receber
     const aReceber = contasReceberFiltradas
       .filter((c: any) => ['Previsto', 'Atrasado', 'Parcial'].includes(c.status))
-      .reduce((sum: number, c: any) => sum + (c.valor_total - c.valor_recebido), 0);
+      .reduce(
+        (sum: number, c: any) =>
+          sum + (asNumber(c.valor_total) - asNumber(c.valor_recebido)),
+        0
+      );
     setTotalAReceber(aReceber);
 
     // Total de funcionários
@@ -124,14 +135,17 @@ export default function DashboardMulti() {
     const hoje = new Date().toISOString().split('T')[0];
     const extrasHoje = extrasFiltrados
       .filter((e: any) => e.data_pagamento === hoje)
-      .reduce((sum: number, e: any) => sum + e.valor, 0);
+      .reduce((sum: number, e: any) => sum + asNumber(e.valor), 0);
     setTotalPagamentosExtras(extrasHoje);
 
     // Dados para gráfico de distribuição por empresa
     if (!empresaSelecionada) {
       const empresasChart = (empData.data || []).map((emp: any) => {
         const contasEmp = contas.filter((c: any) => c.empresa_id === emp.id);
-        const saldoEmp = contasEmp.reduce((sum: number, c: any) => sum + c.saldo_atual, 0);
+        const saldoEmp = contasEmp.reduce(
+          (sum: number, c: any) => sum + asNumber(c.saldo_atual),
+          0
+        );
         return {
           id: emp.id,
           nome: emp.nome.split(' - ')[0],
@@ -145,7 +159,7 @@ export default function DashboardMulti() {
     const distribuicao = contasFiltradas.map((c: any) => ({
       id: c.id,
       nome: c.nome,
-      valor: c.saldo_atual,
+      valor: asNumber(c.saldo_atual),
     }));
     setDistribuicaoContas(distribuicao);
   };

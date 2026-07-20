@@ -4,8 +4,17 @@
  * @param decimals - Número de casas decimais (padrão: 2)
  * @returns String formatada no padrão brasileiro
  */
-export function formatarNumero(value: number, decimals: number = 2): string {
-  return value.toLocaleString('pt-BR', {
+function toFiniteNumber(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
+
+export function formatarNumero(value: number | string, decimals: number = 2): string {
+  return toFiniteNumber(value).toLocaleString('pt-BR', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
@@ -16,9 +25,8 @@ export function formatarNumero(value: number, decimals: number = 2): string {
  * @param value - Valor numérico a ser formatado
  * @returns String formatada com símbolo de moeda
  */
-export function formatarMoeda(value: number): string {
-  const n = Number.isFinite(value) ? value : 0;
-  return n.toLocaleString('pt-BR', {
+export function formatarMoeda(value: number | string | null | undefined): string {
+  return toFiniteNumber(value).toLocaleString('pt-BR', {
     style: 'currency',
     currency: 'BRL',
   });
@@ -30,9 +38,8 @@ export function formatarMoeda(value: number): string {
  * @param decimals - Número de casas decimais (padrão: 2)
  * @returns String formatada com símbolo de porcentagem
  */
-export function formatarPorcentagem(value: number, decimals: number = 2): string {
-  const n = Number.isFinite(value) ? value : 0;
-  return `${formatarNumero(n, decimals)}%`;
+export function formatarPorcentagem(value: number | string, decimals: number = 2): string {
+  return `${formatarNumero(toFiniteNumber(value), decimals)}%`;
 }
 
 /**
@@ -40,9 +47,14 @@ export function formatarPorcentagem(value: number, decimals: number = 2): string
  * @param value - Valor numérico a ser formatado
  * @returns String formatada sem casas decimais
  */
-export function formatarInteiro(value: number): string {
-  return value.toLocaleString('pt-BR', {
+export function formatarInteiro(value: number | string): string {
+  return toFiniteNumber(value).toLocaleString('pt-BR', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
+}
+
+/** Converte valor do Postgres (string/number) para número finito. */
+export function asNumber(value: unknown): number {
+  return toFiniteNumber(value);
 }

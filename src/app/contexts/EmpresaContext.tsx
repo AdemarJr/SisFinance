@@ -56,7 +56,20 @@ export function EmpresaProvider({ children }: { children: ReactNode }) {
         .order('nome');
 
       if (error) throw error;
-      setEmpresas(data || []);
+      const list = data || [];
+      setEmpresas(list);
+
+      // Descarta seleção antiga do localStorage se a empresa não existir mais
+      setEmpresaSelecionadaState((current) => {
+        if (!current) return current;
+        if (list.some((e) => e.id === current)) return current;
+        try {
+          window.localStorage.removeItem('empresaSelecionada');
+        } catch {
+          // ignore
+        }
+        return '';
+      });
     } catch (error) {
       console.error('Erro ao carregar empresas:', error);
     } finally {

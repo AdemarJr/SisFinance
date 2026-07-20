@@ -57,12 +57,26 @@ export function Lancamentos() {
   const loadData = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     try {
-      const { data: lancamentosData } = await db
+      const { data: fornecedoresData } = await db.from('fornecedores').select('*');
+      const fornecedoresList = fornecedoresData || [];
+      setFornecedores(fornecedoresList);
+
+      const { data: lancamentosData, error: lancamentosError } = await db
         .from('lancamentos')
-        .select('*, fornecedores(nome)')
+        .select('*')
         .order('data', { ascending: false });
 
-      setLancamentos(lancamentosData || []);
+      if (lancamentosError) throw lancamentosError;
+
+      const fornecedorById = new Map(fornecedoresList.map((f: any) => [f.id, f]));
+      setLancamentos(
+        (lancamentosData || []).map((l: any) => ({
+          ...l,
+          fornecedores: l.fornecedor_id
+            ? { nome: fornecedorById.get(l.fornecedor_id)?.nome }
+            : null,
+        }))
+      );
 
       const { data: contasData } = await db
         .from('contas_financeiras')
@@ -85,9 +99,6 @@ export function Lancamentos() {
 
       const { data: empresasData } = await db.from('empresas').select('*');
       setEmpresas(empresasData || []);
-
-      const { data: fornecedoresData } = await db.from('fornecedores').select('*');
-      setFornecedores(fornecedoresData || []);
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
       toast.error('Erro ao carregar lançamentos');
