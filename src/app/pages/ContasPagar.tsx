@@ -9,6 +9,7 @@ import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useEmpresa } from '../contexts/EmpresaContext';
 import { useSupabaseRealtimeRefresh } from '../../lib/useSupabaseRealtimeRefresh';
+import { formatarData, hojeLocalYYYYMMDD, toDateInputValue } from '../../lib/formatters';
 
 export function ContasPagar() {
   const { empresaSelecionada } = useEmpresa();
@@ -27,8 +28,8 @@ export function ContasPagar() {
     empresa_id: '',
     descricao: '',
     valor_total: '',
-    data_emissao: new Date().toISOString().split('T')[0],
-    data_vencimento: new Date().toISOString().split('T')[0],
+    data_emissao: hojeLocalYYYYMMDD(),
+    data_vencimento: hojeLocalYYYYMMDD(),
     fornecedor_id: '',
     status: 'Em Aberto' as 'Em Aberto' | 'Pago' | 'Atrasado' | 'Parcial',
     tipo_folha: 'mensal' as 'mensal' | 'semanal' | 'quinzenal',
@@ -167,7 +168,7 @@ export function ContasPagar() {
         .update({
           status: 'Pago',
           valor_pago: valorTotal,
-          data_pagamento: new Date().toISOString().split('T')[0],
+          data_pagamento: hojeLocalYYYYMMDD(),
         })
         .eq('id', id);
 
@@ -217,8 +218,8 @@ export function ContasPagar() {
         empresa_id: conta.empresa_id,
         descricao: conta.descricao,
         valor_total: conta.valor_total.toString(),
-        data_emissao: conta.data_emissao,
-        data_vencimento: conta.data_vencimento,
+        data_emissao: toDateInputValue(conta.data_emissao),
+        data_vencimento: toDateInputValue(conta.data_vencimento),
         fornecedor_id: '',
         status: conta.status,
         tipo_folha: tipo as any,
@@ -230,8 +231,8 @@ export function ContasPagar() {
         empresa_id: conta.empresa_id,
         descricao: conta.descricao,
         valor_total: conta.valor_total.toString(),
-        data_emissao: conta.data_emissao,
-        data_vencimento: conta.data_vencimento,
+        data_emissao: toDateInputValue(conta.data_emissao),
+        data_vencimento: toDateInputValue(conta.data_vencimento),
         fornecedor_id: conta.fornecedor_id || '',
         status: conta.status,
         tipo_folha: 'mensal',
@@ -270,8 +271,8 @@ export function ContasPagar() {
       empresa_id: empresaSelecionada,
       descricao: '',
       valor_total: '',
-      data_emissao: new Date().toISOString().split('T')[0],
-      data_vencimento: new Date().toISOString().split('T')[0],
+      data_emissao: hojeLocalYYYYMMDD(),
+      data_vencimento: hojeLocalYYYYMMDD(),
       fornecedor_id: '',
       status: 'Em Aberto',
       tipo_folha: 'mensal',
@@ -408,7 +409,7 @@ export function ContasPagar() {
                         : (conta.fornecedores?.nome || '-')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                      {new Date(conta.data_vencimento).toLocaleDateString('pt-BR')}
+                      {formatarData(conta.data_vencimento)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-rose-600 dark:text-rose-400">
                       R${' '}
@@ -731,7 +732,7 @@ export function ContasPagar() {
                 <div>
                   <p className="text-sm text-muted-foreground">Data de Vencimento</p>
                   <p className="font-semibold text-foreground">
-                    {new Date(contaSelecionada.data_vencimento).toLocaleDateString('pt-BR')}
+                    {formatarData(contaSelecionada.data_vencimento)}
                   </p>
                 </div>
                 <div>

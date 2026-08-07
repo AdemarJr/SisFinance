@@ -73,10 +73,37 @@ export function formatarData(value: string | Date | null | undefined): string {
   return date.toLocaleDateString('pt-BR');
 }
 
+/**
+ * Formata data+hora ISO para exibição pt-BR.
+ * Timestamps com T/Z usam o instante real; datas puras usam meio-dia local.
+ */
+export function formatarDataHora(value: string | Date | null | undefined): string {
+  if (!value) return '-';
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return '-';
+    return value.toLocaleString('pt-BR');
+  }
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return formatarData(raw);
+  }
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return formatarData(raw);
+  return date.toLocaleString('pt-BR');
+}
+
 /** Normaliza para input type="date" (YYYY-MM-DD). */
 export function toDateInputValue(value: string | Date | null | undefined): string {
   if (!value) return '';
   const raw = value instanceof Date ? value.toISOString() : String(value);
   const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
   return match ? match[1] : '';
+}
+
+/** Data de hoje no fuso local (YYYY-MM-DD). Evita off-by-one do toISOString() UTC. */
+export function hojeLocalYYYYMMDD(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }

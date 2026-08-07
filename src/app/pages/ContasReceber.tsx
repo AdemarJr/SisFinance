@@ -9,6 +9,7 @@ import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useEmpresa } from '../contexts/EmpresaContext';
 import { useSupabaseRealtimeRefresh } from '../../lib/useSupabaseRealtimeRefresh';
+import { formatarData, hojeLocalYYYYMMDD, toDateInputValue } from '../../lib/formatters';
 
 export function ContasReceber() {
   const { empresaSelecionada } = useEmpresa();
@@ -22,8 +23,8 @@ export function ContasReceber() {
     empresa_id: '',
     descricao: '',
     valor_total: '',
-    data_emissao: new Date().toISOString().split('T')[0],
-    data_vencimento: new Date().toISOString().split('T')[0],
+    data_emissao: hojeLocalYYYYMMDD(),
+    data_vencimento: hojeLocalYYYYMMDD(),
     cliente_id: '',
     status: 'Previsto' as 'Previsto' | 'Recebido' | 'Atrasado' | 'Parcial',
   });
@@ -132,7 +133,7 @@ export function ContasReceber() {
         .update({
           status: 'Recebido',
           valor_recebido: valorTotal,
-          data_recebimento: new Date().toISOString().split('T')[0],
+          data_recebimento: hojeLocalYYYYMMDD(),
         })
         .eq('id', id);
 
@@ -151,8 +152,8 @@ export function ContasReceber() {
       empresa_id: conta.empresa_id,
       descricao: conta.descricao,
       valor_total: conta.valor_total.toString(),
-      data_emissao: conta.data_emissao,
-      data_vencimento: conta.data_vencimento,
+      data_emissao: toDateInputValue(conta.data_emissao),
+      data_vencimento: toDateInputValue(conta.data_vencimento),
       cliente_id: conta.cliente_id || '',
       status: conta.status,
     });
@@ -180,8 +181,8 @@ export function ContasReceber() {
       empresa_id: empresaSelecionada,
       descricao: '',
       valor_total: '',
-      data_emissao: new Date().toISOString().split('T')[0],
-      data_vencimento: new Date().toISOString().split('T')[0],
+      data_emissao: hojeLocalYYYYMMDD(),
+      data_vencimento: hojeLocalYYYYMMDD(),
       cliente_id: '',
       status: 'Previsto',
     });
@@ -282,7 +283,7 @@ export function ContasReceber() {
                       {conta.clientes?.nome || '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-foreground">
-                      {new Date(conta.data_vencimento).toLocaleDateString('pt-BR')}
+                      {formatarData(conta.data_vencimento)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-emerald-600 dark:text-emerald-400">
                       R${' '}

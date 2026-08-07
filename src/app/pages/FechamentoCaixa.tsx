@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../../lib/db';
-import { formatarMoeda, formatarNumero } from '../../lib/formatters';
+import { formatarMoeda, formatarNumero, formatarData, hojeLocalYYYYMMDD } from '../../lib/formatters';
 import { Calculator, Plus, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
@@ -55,7 +55,7 @@ export default function FechamentoCaixa() {
 
   const [formData, setFormData] = useState({
     empresa_id: '',
-    data_fechamento: new Date().toISOString().split('T')[0],
+    data_fechamento: hojeLocalYYYYMMDD(),
     conta_caixa_id: '',
     saldo_inicial: 0,
     total_entradas: 0,
@@ -134,7 +134,7 @@ export default function FechamentoCaixa() {
 
     setFormData({
       empresa_id: empresaSelecionada || '',
-      data_fechamento: new Date().toISOString().split('T')[0],
+      data_fechamento: hojeLocalYYYYMMDD(),
       conta_caixa_id: contaCaixa?.id || '',
       saldo_inicial: contaCaixa?.saldo_atual || 0,
       total_entradas: 0,
@@ -243,7 +243,7 @@ export default function FechamentoCaixa() {
             <div className="text-3xl font-bold">
               {
                 fechamentosFiltrados.filter(
-                  (f) => f.data_fechamento === new Date().toISOString().split('T')[0]
+                  (f) => toDateInputValue(f.data_fechamento) === hojeLocalYYYYMMDD()
                 ).length
               }
             </div>
@@ -324,7 +324,7 @@ export default function FechamentoCaixa() {
               {fechamentosFiltrados.map((fech) => (
                 <TableRow key={fech.id}>
                   <TableCell className="font-medium">
-                    {new Date(fech.data_fechamento).toLocaleDateString('pt-BR')}
+                    {formatarData(fech.data_fechamento)}
                   </TableCell>
                   <TableCell>{getEmpresaNome(fech.empresa_id)}</TableCell>
                   <TableCell>R$ {fech.saldo_inicial.toFixed(2)}</TableCell>

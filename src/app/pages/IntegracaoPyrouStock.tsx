@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiFetch, parseApiResponse } from '../../lib/api-config';
-import { formatarMoeda, formatarData } from '../../lib/formatters';
+import { formatarMoeda, formatarData, formatarDataHora } from '../../lib/formatters';
 import { RefreshCw, Settings, Download, CheckCircle, AlertCircle, Package, ShoppingCart, CreditCard, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
@@ -259,7 +259,7 @@ export default function IntegracaoPyrouStock() {
                   <p className="text-sm text-muted-foreground">Última Sincronização</p>
                   <p className="font-medium">
                     {config.ultima_sincronizacao
-                      ? new Date(config.ultima_sincronizacao).toLocaleString('pt-BR')
+                      ? formatarDataHora(config.ultima_sincronizacao)
                       : 'Nunca'}
                   </p>
                 </div>
@@ -422,13 +422,7 @@ export default function IntegracaoPyrouStock() {
                       {vendas.map((venda: any) => (
                         <TableRow key={venda.id}>
                           <TableCell>
-                            {new Date(venda.data).toLocaleString('pt-BR', {
-                              day: '2-digit',
-                              month: '2-digit',
-                              year: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                            {formatarDataHora(venda.data)}
                           </TableCell>
                           <TableCell className="font-medium">
                             #{venda.numero_recibo || venda.id.slice(-8)}
@@ -502,7 +496,7 @@ export default function IntegracaoPyrouStock() {
                       {caixas.map((caixa: any) => (
                         <TableRow key={caixa.id}>
                           <TableCell>
-                            {new Date(caixa.data_fechamento).toLocaleString('pt-BR')}
+                            {formatarDataHora(caixa.data_fechamento)}
                           </TableCell>
                           <TableCell>{caixa.duracao}</TableCell>
                           <TableCell>{formatarMoeda(caixa.saldo_abertura)}</TableCell>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { db, isUsingMockData } from '../../lib/db';
-import { formatarMoeda, formatarNumero, asNumber } from '../../lib/formatters';
+import { formatarMoeda, formatarNumero, asNumber, hojeLocalYYYYMMDD, toDateInputValue } from '../../lib/formatters';
 import {
   TrendingUp,
   TrendingDown,
@@ -132,9 +132,9 @@ export default function DashboardMulti() {
     setTotalFuncionarios(funcionariosFiltrados.filter((f: any) => f.ativo).length);
 
     // Total de pagamentos extras hoje
-    const hoje = new Date().toISOString().split('T')[0];
+    const hoje = hojeLocalYYYYMMDD();
     const extrasHoje = extrasFiltrados
-      .filter((e: any) => e.data_pagamento === hoje)
+      .filter((e: any) => toDateInputValue(e.data_pagamento) === hoje)
       .reduce((sum: number, e: any) => sum + asNumber(e.valor), 0);
     setTotalPagamentosExtras(extrasHoje);
 
@@ -323,8 +323,9 @@ export default function DashboardMulti() {
                 Distribuição de saldos entre as unidades
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
+            <CardContent className="min-w-0">
+              <div className="h-[300px] w-full min-w-0">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                 <BarChart data={chartData} id="saldo-empresas-bar">
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="nome" />
@@ -334,6 +335,7 @@ export default function DashboardMulti() {
                   <Bar dataKey="saldo" fill="#3b82f6" name="Saldo (R$)" />
                 </BarChart>
               </ResponsiveContainer>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -345,8 +347,9 @@ export default function DashboardMulti() {
               Como o dinheiro está distribuído
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
+          <CardContent className="min-w-0">
+            <div className="h-[300px] w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <PieChart id="distribuicao-contas-pie">
                 <Pie
                   data={distribuicaoContas}
@@ -365,6 +368,7 @@ export default function DashboardMulti() {
                 <Tooltip formatter={(value) => formatarValorGrafico(Number(value))} />
               </PieChart>
             </ResponsiveContainer>
+            </div>
           </CardContent>
         </Card>
       </div>

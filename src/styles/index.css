@@ -2,58 +2,75 @@
 @import './tailwind.css';
 @import './theme.css';
 
-/* Relatório financeiro — impressão A4 */
+/* Relatório financeiro — impressão A4 (Chrome, Edge, Firefox, Safari) */
 @media print {
   @page {
     size: A4;
     margin: 12mm;
   }
 
+  html,
   body {
     background: white !important;
+    height: auto !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
+  /* Esconde chrome da app; Safari não lida bem só com visibility em body * */
   body * {
-    visibility: hidden;
+    visibility: hidden !important;
   }
 
   #relatorio-print-area,
   #relatorio-print-area * {
-    visibility: visible;
+    visibility: visible !important;
   }
 
   #relatorio-print-area {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    margin: 0;
-    padding: 0;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
     border: none !important;
     border-radius: 0 !important;
     box-shadow: none !important;
     background: white !important;
     color: #0f172a !important;
+    overflow: visible !important;
   }
 
   .no-print {
     display: none !important;
+    visibility: hidden !important;
   }
 
   .print-only {
     display: block !important;
+    visibility: visible !important;
   }
 
   .relatorio-documento table {
     font-size: 11px;
+    width: 100%;
+    border-collapse: collapse;
   }
 
-  .relatorio-documento tr {
+  .relatorio-documento tr,
+  .relatorio-documento thead,
+  .relatorio-documento tbody {
     break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   a {
     text-decoration: none;
+    color: inherit !important;
   }
 }
 

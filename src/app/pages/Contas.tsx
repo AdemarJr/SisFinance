@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
 import { useEmpresa } from '../contexts/EmpresaContext';
+import { formatarData, hojeLocalYYYYMMDD, toDateInputValue } from '../../lib/formatters';
 
 export function Contas() {
   const { empresaSelecionada } = useEmpresa();
@@ -18,7 +19,7 @@ export function Contas() {
     nome: '',
     tipo: 'Banco' as 'Caixa' | 'Banco' | 'Cartão',
     saldo_inicial: '',
-    data_inicio: new Date().toISOString().split('T')[0],
+    data_inicio: hojeLocalYYYYMMDD(),
     ativo: true,
   });
 
@@ -94,7 +95,7 @@ export function Contas() {
       nome: conta.nome,
       tipo: conta.tipo,
       saldo_inicial: conta.saldo_inicial.toString(),
-      data_inicio: conta.data_inicio,
+      data_inicio: toDateInputValue(conta.data_inicio),
       ativo: conta.ativo,
     });
     setDialogOpen(true);
@@ -122,7 +123,7 @@ export function Contas() {
       nome: '',
       tipo: 'Banco',
       saldo_inicial: '',
-      data_inicio: new Date().toISOString().split('T')[0],
+      data_inicio: hojeLocalYYYYMMDD(),
       ativo: true,
     });
   };
@@ -252,7 +253,7 @@ export function Contas() {
                 </div>
                 <div className="text-xs text-slate-600 mt-1">
                   <span className="font-medium">Início:</span>{' '}
-                  {new Date(conta.data_inicio).toLocaleDateString('pt-BR')}
+                  {formatarData(conta.data_inicio)}
                 </div>
               </div>
 

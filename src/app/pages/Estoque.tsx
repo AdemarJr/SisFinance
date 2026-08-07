@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../../lib/db';
-import { formatarMoeda, formatarNumero } from '../../lib/formatters';
+import { formatarMoeda, formatarNumero, hojeLocalYYYYMMDD } from '../../lib/formatters';
 import { Package, Plus, Edit, Trash2, TrendingUp, DollarSign, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
@@ -76,7 +76,7 @@ export default function Estoque() {
     tipo_movimentacao: 'Entrada',
     quantidade: 0,
     preco_unitario: 0,
-    data_movimentacao: new Date().toISOString().split('T')[0],
+    data_movimentacao: hojeLocalYYYYMMDD(),
     documento: '',
     observacao: '',
   });
@@ -163,7 +163,7 @@ export default function Estoque() {
       tipo_movimentacao: 'Entrada',
       quantidade: 0,
       preco_unitario: 0,
-      data_movimentacao: new Date().toISOString().split('T')[0],
+      data_movimentacao: hojeLocalYYYYMMDD(),
       documento: '',
       observacao: '',
     });

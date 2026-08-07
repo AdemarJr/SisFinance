@@ -808,9 +808,9 @@ function montarGastosFornecedor(despesas: MovimentoDetalhe[]): GastoFornecedor[]
 
 export function formatarDataBR(iso: string): string {
   if (!iso) return '—';
-  const [y, m, d] = iso.split('-');
-  if (!y || !m || !d) return iso;
-  return `${d}/${m}/${y}`;
+  const match = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return iso;
+  return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
 export function periodoAnterior(dataInicio: string, dataFim: string): PeriodoFiltro {

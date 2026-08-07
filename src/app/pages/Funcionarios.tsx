@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { formatarMoeda } from '../../lib/formatters';
+import { formatarMoeda, formatarData, hojeLocalYYYYMMDD, toDateInputValue } from '../../lib/formatters';
 import { Button } from '../components/ui/button';
 import {
   Card,
@@ -92,7 +92,7 @@ export default function Funcionarios() {
     documento: '',
     contato: '',
     salario_base: 0,
-    data_admissao: new Date().toISOString().split('T')[0],
+    data_admissao: hojeLocalYYYYMMDD(),
     ativo: true,
   });
 
@@ -102,7 +102,7 @@ export default function Funcionarios() {
     conta_origem_id: '',
     tipo_extra: 'Gorjeta',
     valor: 0,
-    data_pagamento: new Date().toISOString().split('T')[0],
+    data_pagamento: hojeLocalYYYYMMDD(),
     descricao: '',
     status: 'Pago',
   });
@@ -141,7 +141,7 @@ export default function Funcionarios() {
         documento: funcionario.documento || '',
         contato: funcionario.contato || '',
         salario_base: funcionario.salario_base,
-        data_admissao: funcionario.data_admissao || '',
+        data_admissao: toDateInputValue(funcionario.data_admissao),
         ativo: funcionario.ativo,
       });
     } else {
@@ -154,7 +154,7 @@ export default function Funcionarios() {
         documento: '',
         contato: '',
         salario_base: 0,
-        data_admissao: new Date().toISOString().split('T')[0],
+        data_admissao: hojeLocalYYYYMMDD(),
         ativo: true,
       });
     }
@@ -210,7 +210,7 @@ export default function Funcionarios() {
       conta_origem_id: contas[0]?.id || '',
       tipo_extra: 'Gorjeta',
       valor: 0,
-      data_pagamento: new Date().toISOString().split('T')[0],
+      data_pagamento: hojeLocalYYYYMMDD(),
       descricao: '',
       status: 'Pago',
     });
@@ -246,7 +246,7 @@ export default function Funcionarios() {
   };
 
   const totalPagamentosHoje = pagamentos
-    .filter((p) => p.data_pagamento === new Date().toISOString().split('T')[0])
+    .filter((p) => toDateInputValue(p.data_pagamento) === hojeLocalYYYYMMDD())
     .reduce((sum, p) => sum + p.valor, 0);
 
   return (
@@ -403,7 +403,7 @@ export default function Funcionarios() {
                   {pagamentos.map((pag) => (
                     <TableRow key={pag.id}>
                       <TableCell>
-                        {new Date(pag.data_pagamento).toLocaleDateString('pt-BR')}
+                        {formatarData(pag.data_pagamento)}
                       </TableCell>
                       <TableCell>
                         {getFuncionarioNome(pag.funcionario_id)}

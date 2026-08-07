@@ -9,15 +9,7 @@ import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useEmpresa } from '../contexts/EmpresaContext';
-import { formatarData, toDateInputValue } from '../../lib/formatters';
-
-// Helper para obter data local no formato YYYY-MM-DD
-const getLocalDateString = (date: Date = new Date()): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
+import { formatarData, toDateInputValue, hojeLocalYYYYMMDD } from '../../lib/formatters';
 
 export function Lancamentos() {
   const { empresaSelecionada } = useEmpresa();
@@ -32,7 +24,7 @@ export function Lancamentos() {
   
   const [formData, setFormData] = useState({
     empresa_id: '',
-    data: getLocalDateString(),
+    data: hojeLocalYYYYMMDD(),
     tipo: 'Receita' as 'Receita' | 'Despesa' | 'Transferência',
     valor: '',
     descricao: '',
@@ -193,7 +185,7 @@ export function Lancamentos() {
     setEditingId(null);
     setFormData({
       empresa_id: empresaSelecionada,
-      data: getLocalDateString(),
+      data: hojeLocalYYYYMMDD(),
       tipo: 'Receita',
       valor: '',
       descricao: '',

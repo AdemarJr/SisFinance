@@ -32,7 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from '../components/ui/table';
-import { formatarMoeda, formatarPorcentagem } from '../../lib/formatters';
+import { formatarMoeda, formatarPorcentagem, formatarDataHora } from '../../lib/formatters';
 import {
   gerarRelatorioCompleto,
   calcularIntervaloPeriodo,
@@ -242,7 +242,10 @@ export function Relatorios() {
       toast.error('Gere o relatório antes de imprimir.');
       return;
     }
-    window.print();
+    // Safari/Firefox: aguarda layout do bloco de impressão antes do diálogo
+    requestAnimationFrame(() => {
+      window.print();
+    });
   };
 
   const exportarCsv = () => {
@@ -552,11 +555,7 @@ export function Relatorios() {
                   Período: {formatarDataBR(meta.dataInicio)} a {formatarDataBR(meta.dataFim)}
                 </p>
                 <p>
-                  Emitido em:{' '}
-                  {geradoEm?.toLocaleString('pt-BR', {
-                    dateStyle: 'short',
-                    timeStyle: 'short',
-                  })}
+                  Emitido em: {formatarDataHora(geradoEm)}
                 </p>
               </div>
             </div>
