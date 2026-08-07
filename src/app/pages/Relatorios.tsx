@@ -36,6 +36,8 @@ import { formatarMoeda, formatarPorcentagem, formatarDataHora } from '../../lib/
 import {
   gerarRelatorioCompleto,
   calcularIntervaloPeriodo,
+  periodoPadraoRelatorio,
+  buscarIntervaloDadosDisponiveis,
   formatarDataBR,
   listarFornecedoresRelatorio,
   type RelatorioCompleto,
@@ -155,6 +157,11 @@ export function Relatorios() {
   const [loading, setLoading] = useState(false);
   const [relatorio, setRelatorio] = useState<RelatorioCompleto | null>(null);
   const [geradoEm, setGeradoEm] = useState<Date | null>(null);
+  const [intervaloDisponivel, setIntervaloDisponivel] = useState<{
+    dataInicio: string;
+    dataFim: string;
+    total: number;
+  } | null>(null);
   const [meta, setMeta] = useState<{
     tipo: TipoRelatorio;
     dataInicio: string;
@@ -169,6 +176,28 @@ export function Relatorios() {
       .then(setFornecedores)
       .catch(() => setFornecedores([]));
   }, []);
+
+  // Período padrão: mês atual se houver dados; senão, último mês com lançamentos
+  useEffect(() => {
+    let cancelled = false;
+    const empresaId =
+      escopo === 'selecionada' && empresaSelecionada ? empresaSelecionada : undefined;
+
+    void (async () => {
+      const [padrao, disponivel] = await Promise.all([
+        periodoPadraoRelatorio(empresaId),
+        buscarIntervaloDadosDisponiveis(empresaId),
+      ]);
+      if (cancelled) return;
+      setDataInicio(padrao.dataInicio);
+      setDataFim(padrao.dataFim);
+      setIntervaloDisponivel(disponivel);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [escopo, empresaSelecionada]);
 
   const tipoInfo = TIPOS.find((t) => t.id === tipo)!;
 
@@ -222,7 +251,13 @@ export function Relatorios() {
           : empresaAtual?.nome || 'Empresa',
         empresaCnpj: usarTodas ? '—' : empresaAtual?.cnpj || '—',
       });
-      toast.success('Relatório gerado');
+      if (dados.avisoPeriodo) {
+        toast.message('Período sem lançamentos', {
+          description: dados.avisoPeriodo.mensagem,
+        });
+      } else {
+        toast.success('Relatório gerado');
+      }
     } catch (error) {
       console.error(error);
       toast.error('Falha ao gerar relatório. Verifique a API.');
@@ -232,6 +267,25 @@ export function Relatorios() {
   };
 
   const aplicarAtalho = (periodo: string) => {
+    if (periodo === 'dados') {
+      if (intervaloDisponivel) {
+        setDataInicio(intervaloDisponivel.dataInicio);
+        setDataFim(intervaloDisponivel.dataFim);
+      } else {
+        void buscarIntervaloDadosDisponiveis(
+          escopo === 'selecionada' && empresaSelecionada ? empresaSelecionada : undefined
+        ).then((d) => {
+          if (!d) {
+            toast.error('Nenhum lançamento encontrado para definir o período.');
+            return;
+          }
+          setIntervaloDisponivel(d);
+          setDataInicio(d.dataInicio);
+          setDataFim(d.dataFim);
+        });
+      }
+      return;
+    }
     const p = calcularIntervaloPeriodo(periodo);
     setDataInicio(p.dataInicio);
     setDataFim(p.dataFim);
@@ -401,7 +455,10 @@ export function Relatorios() {
                 Semana
               </Button>
               <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('mes-atual')}>
-                Mês
+                Mês atual
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('mes-anterior')}>
+                Mês anterior
               </Button>
               <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('trimestre')}>
                 Trimestre
@@ -409,10 +466,20 @@ export function Relatorios() {
               <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('ano')}>
                 Ano
               </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('dados')}>
+                Dados disponíveis
+              </Button>
               <Button type="button" variant="outline" size="sm" onClick={() => aplicarAtalho('tudo')}>
                 Todo período
               </Button>
             </div>
+            {intervaloDisponivel && (
+              <p className="sm:col-span-4 text-xs text-muted-foreground">
+                Lançamentos no escopo: {intervaloDisponivel.total} · de{' '}
+                {formatarDataBR(intervaloDisponivel.dataInicio)} a{' '}
+                {formatarDataBR(intervaloDisponivel.dataFim)}
+              </p>
+            )}
           </div>
 
           <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
@@ -602,6 +669,29 @@ export function Relatorios() {
                 </Badge>
               )}
             </div>
+            {relatorio.avisoPeriodo && (
+              <Alert className="mt-4 no-print">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span>{relatorio.avisoPeriodo.mensagem}</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => {
+                      setDataInicio(relatorio.avisoPeriodo!.dadosInicio);
+                      setDataFim(relatorio.avisoPeriodo!.dadosFim);
+                      toast.message('Período ajustado', {
+                        description: 'Clique em Gerar relatório novamente.',
+                      });
+                    }}
+                  >
+                    Usar período com dados
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            )}
           </header>
 
           <div className="px-6 py-6 sm:px-8 space-y-8">
@@ -747,8 +837,28 @@ export function Relatorios() {
                 {relatorio.qtdLancamentos === 0 ? (
                   <Alert>
                     <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>
-                      Nenhum lançamento no período selecionado.
+                    <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <span>
+                        {relatorio.avisoPeriodo?.mensagem ||
+                          'Nenhum lançamento no período selecionado.'}
+                      </span>
+                      {relatorio.avisoPeriodo && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0 no-print"
+                          onClick={() => {
+                            setDataInicio(relatorio.avisoPeriodo!.dadosInicio);
+                            setDataFim(relatorio.avisoPeriodo!.dadosFim);
+                            toast.message('Período ajustado', {
+                              description: 'Clique em Gerar relatório novamente.',
+                            });
+                          }}
+                        >
+                          Usar período com dados
+                        </Button>
+                      )}
                     </AlertDescription>
                   </Alert>
                 ) : (

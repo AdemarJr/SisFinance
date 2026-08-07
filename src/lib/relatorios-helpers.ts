@@ -119,6 +119,12 @@ export interface RelatorioCompleto extends RelatorioData {
   orcadoEstimado: boolean;
   notas: string[];
   filtrosAplicados: FiltrosAplicados;
+  /** Quando o período filtrado não tem movimentos, sugere o intervalo real dos dados */
+  avisoPeriodo?: {
+    mensagem: string;
+    dadosInicio: string;
+    dadosFim: string;
+  };
 }
 
 export function toLocalDateString(date: Date): string {
@@ -126,6 +132,27 @@ export function toLocalDateString(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+/** Normaliza YYYY-MM-DD / ISO / Date para comparação e filtros. */
+export function normalizeDateOnly(value: unknown): string {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toLocalDateString(value);
+  }
+  const raw = String(value ?? '').trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+}
+
+function parseLocalDate(value: string): Date {
+  const iso = normalizeDateOnly(value);
+  if (iso) {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d, 12, 0, 0, 0);
+  }
+  const fallback = new Date(value);
+  fallback.setHours(12, 0, 0, 0);
+  return fallback;
 }
 
 function num(value: unknown): number {
@@ -176,8 +203,14 @@ async function queryRows(
   const trySelect = async (select: string) => {
     let q = db.from(table).select(select) as unknown as AnyBuilder;
     if (opts.empresaId) q = q.eq('empresa_id', opts.empresaId);
-    if (opts.gte) q = q.gte(opts.gte[0], opts.gte[1]);
-    if (opts.lte) q = q.lte(opts.lte[0], opts.lte[1]);
+    if (opts.gte) {
+      const gteVal = normalizeDateOnly(opts.gte[1]) || opts.gte[1];
+      q = q.gte(opts.gte[0], gteVal);
+    }
+    if (opts.lte) {
+      const lteVal = normalizeDateOnly(opts.lte[1]) || opts.lte[1];
+      q = q.lte(opts.lte[0], lteVal);
+    }
     if (opts.inFilter) q = q.in(opts.inFilter[0], opts.inFilter[1]);
     if (opts.order) q = q.order(opts.order.column, { ascending: opts.order.ascending ?? true });
     const { data, error } = await q;
@@ -327,7 +360,7 @@ async function calcularFluxoCaixa(
   lancamentos: any[]
 ) {
   try {
-    const dataAnterior = new Date(`${filtro.dataInicio}T12:00:00`);
+    const dataAnterior = parseLocalDate(filtro.dataInicio);
     dataAnterior.setDate(dataAnterior.getDate() - 1);
     const dataAnteriorStr = toLocalDateString(dataAnterior);
 
@@ -379,8 +412,8 @@ async function calcularFluxoCaixa(
         .reduce((s, l) => s + num(l.valor), 0);
     }
 
-    const dataIni = new Date(`${filtro.dataInicio}T12:00:00`);
-    const dataFim = new Date(`${filtro.dataFim}T12:00:00`);
+    const dataIni = parseLocalDate(filtro.dataInicio);
+    const dataFim = parseLocalDate(filtro.dataFim);
     const dias = Math.max(
       1,
       Math.floor((dataFim.getTime() - dataIni.getTime()) / 86400000) + 1
@@ -413,8 +446,8 @@ async function calcularPrazosMedios(filtro: PeriodoFiltro) {
     const recOk = recebidas.filter((c) => c.data_emissao && c.data_recebimento);
     if (recOk.length > 0) {
       const total = recOk.reduce((sum, c) => {
-        const a = new Date(`${c.data_emissao}T12:00:00`).getTime();
-        const b = new Date(`${c.data_recebimento}T12:00:00`).getTime();
+        const a = parseLocalDate(String(c.data_emissao)).getTime();
+        const b = parseLocalDate(String(c.data_recebimento)).getTime();
         return sum + Math.max(0, Math.floor((b - a) / 86400000));
       }, 0);
       pmr = Math.round(total / recOk.length);
@@ -432,8 +465,8 @@ async function calcularPrazosMedios(filtro: PeriodoFiltro) {
     const pagOk = pagas.filter((c) => c.data_emissao && c.data_pagamento);
     if (pagOk.length > 0) {
       const total = pagOk.reduce((sum, c) => {
-        const a = new Date(`${c.data_emissao}T12:00:00`).getTime();
-        const b = new Date(`${c.data_pagamento}T12:00:00`).getTime();
+        const a = parseLocalDate(String(c.data_emissao)).getTime();
+        const b = parseLocalDate(String(c.data_pagamento)).getTime();
         return sum + Math.max(0, Math.floor((b - a) / 86400000));
       }, 0);
       pmp = Math.round(total / pagOk.length);
@@ -468,7 +501,7 @@ async function calcularAging(empresaId?: string) {
 
     contas.forEach((conta) => {
       if (!conta.data_vencimento) return;
-      const venc = new Date(`${conta.data_vencimento}T12:00:00`);
+      const venc = parseLocalDate(String(conta.data_vencimento));
       const dias = Math.floor((hoje.getTime() - venc.getTime()) / 86400000);
       const valor = Math.max(0, num(conta.valor_total) - num(conta.valor_recebido));
       if (valor <= 0) return;
@@ -814,8 +847,8 @@ export function formatarDataBR(iso: string): string {
 }
 
 export function periodoAnterior(dataInicio: string, dataFim: string): PeriodoFiltro {
-  const ini = new Date(`${dataInicio}T12:00:00`);
-  const fim = new Date(`${dataFim}T12:00:00`);
+  const ini = parseLocalDate(dataInicio);
+  const fim = parseLocalDate(dataFim);
   const dias = Math.max(1, Math.floor((fim.getTime() - ini.getTime()) / 86400000) + 1);
   const fimAnt = new Date(ini);
   fimAnt.setDate(fimAnt.getDate() - 1);
@@ -827,14 +860,20 @@ export function periodoAnterior(dataInicio: string, dataFim: string): PeriodoFil
   };
 }
 
+/** Último dia do mês civil (hora local meio-dia). */
+function fimDoMes(ano: number, mes0: number): Date {
+  return new Date(ano, mes0 + 1, 0, 12, 0, 0, 0);
+}
+
 export function calcularIntervaloPeriodo(
   periodo: string,
   referencia: Date = new Date()
 ): { dataInicio: string; dataFim: string } {
   const hoje = new Date(referencia);
   hoje.setHours(12, 0, 0, 0);
+
   let dataInicio: Date;
-  const dataFim = hoje;
+  let dataFim: Date = hoje;
 
   switch (periodo) {
     case 'semana': {
@@ -842,30 +881,101 @@ export function calcularIntervaloPeriodo(
       dataInicio.setDate(hoje.getDate() - 6);
       break;
     }
+    case 'mes-anterior': {
+      const ano = hoje.getMonth() === 0 ? hoje.getFullYear() - 1 : hoje.getFullYear();
+      const mes = hoje.getMonth() === 0 ? 11 : hoje.getMonth() - 1;
+      dataInicio = new Date(ano, mes, 1, 12, 0, 0, 0);
+      dataFim = fimDoMes(ano, mes);
+      break;
+    }
     case 'trimestre': {
       const trimestre = Math.floor(hoje.getMonth() / 3);
-      dataInicio = new Date(hoje.getFullYear(), trimestre * 3, 1);
+      dataInicio = new Date(hoje.getFullYear(), trimestre * 3, 1, 12, 0, 0, 0);
+      // Mantém até hoje dentro do trimestre corrente
       break;
     }
     case 'ano': {
-      dataInicio = new Date(hoje.getFullYear(), 0, 1);
+      dataInicio = new Date(hoje.getFullYear(), 0, 1, 12, 0, 0, 0);
       break;
     }
     case 'tudo': {
-      dataInicio = new Date(2000, 0, 1);
+      dataInicio = new Date(2000, 0, 1, 12, 0, 0, 0);
       break;
     }
     case 'mes-atual':
     default: {
-      dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+      dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1, 12, 0, 0, 0);
       break;
     }
   }
 
   dataInicio.setHours(12, 0, 0, 0);
+  dataFim.setHours(12, 0, 0, 0);
   return {
     dataInicio: toLocalDateString(dataInicio),
     dataFim: toLocalDateString(dataFim),
+  };
+}
+
+/** Intervalo real de lançamentos no banco (para atalhos e período padrão). */
+export async function buscarIntervaloDadosDisponiveis(empresaId?: string): Promise<{
+  dataInicio: string;
+  dataFim: string;
+  total: number;
+} | null> {
+  try {
+    const rows = await queryRows('lancamentos', {
+      select: 'data',
+      empresaId,
+      order: { column: 'data', ascending: true },
+    });
+    if (!rows.length) return null;
+
+    let min = normalizeDateOnly(rows[0].data);
+    let max = min;
+    for (const row of rows) {
+      const d = normalizeDateOnly(row.data);
+      if (!d) continue;
+      if (d < min) min = d;
+      if (d > max) max = d;
+    }
+    if (!min || !max) return null;
+    return { dataInicio: min, dataFim: max, total: rows.length };
+  } catch (error) {
+    console.warn('[relatorio] Falha ao buscar intervalo de dados:', error);
+    return null;
+  }
+}
+
+/**
+ * Período inicial inteligente: mês atual se houver dados;
+ * senão, o mês do último lançamento; senão, todo o intervalo disponível.
+ */
+export async function periodoPadraoRelatorio(empresaId?: string): Promise<{
+  dataInicio: string;
+  dataFim: string;
+  origem: 'mes-atual' | 'ultimo-mes-com-dados' | 'dados-disponiveis' | 'mes-atual-vazio';
+}> {
+  const mesAtual = calcularIntervaloPeriodo('mes-atual');
+  const disponivel = await buscarIntervaloDadosDisponiveis(empresaId);
+
+  if (!disponivel) {
+    return { ...mesAtual, origem: 'mes-atual-vazio' };
+  }
+
+  // Há sobreposição com o mês corrente?
+  if (disponivel.dataFim >= mesAtual.dataInicio && disponivel.dataInicio <= mesAtual.dataFim) {
+    return { ...mesAtual, origem: 'mes-atual' };
+  }
+
+  // Usa o mês civil do último lançamento (ex.: fev/2026 se hoje é ago/2026)
+  const ultimo = parseLocalDate(disponivel.dataFim);
+  const inicioMes = new Date(ultimo.getFullYear(), ultimo.getMonth(), 1, 12, 0, 0, 0);
+  const fimMes = fimDoMes(ultimo.getFullYear(), ultimo.getMonth());
+  return {
+    dataInicio: toLocalDateString(inicioMes),
+    dataFim: toLocalDateString(fimMes),
+    origem: 'ultimo-mes-com-dados',
   };
 }
 
@@ -873,6 +983,12 @@ export async function gerarRelatorioCompleto(
   filtro: PeriodoFiltro
 ): Promise<RelatorioCompleto> {
   console.log('🔄 Gerando relatório profissional:', filtro);
+
+  const filtroNormalizado: PeriodoFiltro = {
+    ...filtro,
+    dataInicio: normalizeDateOnly(filtro.dataInicio) || filtro.dataInicio,
+    dataFim: normalizeDateOnly(filtro.dataFim) || filtro.dataFim,
+  };
 
   const [empresasMap, fornecedoresMap, clientesMap] = await Promise.all([
     buscarEmpresasMap(),
@@ -883,63 +999,75 @@ export async function gerarRelatorioCompleto(
   // Lançamentos: fonte principal — select simples (sem join) para não falhar
   let lancamentos = await queryRows('lancamentos', {
     select: '*',
-    empresaId: filtro.empresaId,
-    gte: ['data', filtro.dataInicio],
-    lte: ['data', filtro.dataFim],
+    empresaId: filtroNormalizado.empresaId,
+    gte: ['data', filtroNormalizado.dataInicio],
+    lte: ['data', filtroNormalizado.dataFim],
     order: { column: 'data', ascending: false },
   });
 
-  // Se período sem lançamentos, tenta sem filtro de data (último recurso informativo)
+  let avisoPeriodo: RelatorioCompleto['avisoPeriodo'];
+
+  // Se período sem lançamentos, informa o intervalo real disponível (não inventa dados)
   if (lancamentos.length === 0) {
     console.warn(
-      '⚠️ Nenhum lançamento no período. Buscando todos os lançamentos para diagnóstico...'
+      '⚠️ Nenhum lançamento no período. Verificando intervalo disponível no banco...'
     );
-    const todos = await queryRows('lancamentos', {
-      select: '*',
-      empresaId: filtro.empresaId,
-      order: { column: 'data', ascending: false },
-    });
-    console.log(`📋 Total de lançamentos no banco (escopo): ${todos.length}`);
+    const disponivel = await buscarIntervaloDadosDisponiveis(filtroNormalizado.empresaId);
+    if (disponivel) {
+      avisoPeriodo = {
+        mensagem: `Não há lançamentos entre ${formatarDataBR(filtroNormalizado.dataInicio)} e ${formatarDataBR(filtroNormalizado.dataFim)}. Existem ${disponivel.total} lançamento(s) de ${formatarDataBR(disponivel.dataInicio)} a ${formatarDataBR(disponivel.dataFim)}.`,
+        dadosInicio: disponivel.dataInicio,
+        dadosFim: disponivel.dataFim,
+      };
+      console.log(`📋 Dados disponíveis: ${disponivel.dataInicio} → ${disponivel.dataFim} (${disponivel.total})`);
+    } else {
+      avisoPeriodo = {
+        mensagem:
+          'Não há lançamentos no período selecionado e nenhum lançamento foi encontrado no escopo atual.',
+        dadosInicio: filtroNormalizado.dataInicio,
+        dadosFim: filtroNormalizado.dataFim,
+      };
+    }
   }
 
   let [contasRecebidas, contasPagas, contasReceberTodas, contasPagarTodas] =
     await Promise.all([
       queryRows('contas_receber', {
         select: '*',
-        empresaId: filtro.empresaId,
+        empresaId: filtroNormalizado.empresaId,
         inFilter: ['status', STATUS_RECEBER_RECEBIDO],
-        gte: ['data_recebimento', filtro.dataInicio],
-        lte: ['data_recebimento', filtro.dataFim],
+        gte: ['data_recebimento', filtroNormalizado.dataInicio],
+        lte: ['data_recebimento', filtroNormalizado.dataFim],
       }),
       queryRows('contas_pagar', {
         select: '*',
-        empresaId: filtro.empresaId,
+        empresaId: filtroNormalizado.empresaId,
         inFilter: ['status', STATUS_PAGAR_PAGO],
-        gte: ['data_pagamento', filtro.dataInicio],
-        lte: ['data_pagamento', filtro.dataFim],
+        gte: ['data_pagamento', filtroNormalizado.dataInicio],
+        lte: ['data_pagamento', filtroNormalizado.dataFim],
       }),
       queryRows('contas_receber', {
         select: '*',
-        empresaId: filtro.empresaId,
-        gte: ['data_vencimento', filtro.dataInicio],
-        lte: ['data_vencimento', filtro.dataFim],
+        empresaId: filtroNormalizado.empresaId,
+        gte: ['data_vencimento', filtroNormalizado.dataInicio],
+        lte: ['data_vencimento', filtroNormalizado.dataFim],
       }),
       queryRows('contas_pagar', {
         select: '*',
-        empresaId: filtro.empresaId,
-        gte: ['data_vencimento', filtro.dataInicio],
-        lte: ['data_vencimento', filtro.dataFim],
+        empresaId: filtroNormalizado.empresaId,
+        gte: ['data_vencimento', filtroNormalizado.dataInicio],
+        lte: ['data_vencimento', filtroNormalizado.dataFim],
       }),
     ]);
 
   // Aplica filtros do demonstrativo (tipo, status, fornecedor, etc.)
-  lancamentos = aplicarFiltrosLancamentos(lancamentos, filtro);
-  contasRecebidas = aplicarFiltrosContasReceber(contasRecebidas, filtro);
-  contasPagas = aplicarFiltrosContasPagar(contasPagas, filtro);
-  contasReceberTodas = aplicarFiltrosContasReceber(contasReceberTodas, filtro);
-  contasPagarTodas = aplicarFiltrosContasPagar(contasPagarTodas, filtro);
+  lancamentos = aplicarFiltrosLancamentos(lancamentos, filtroNormalizado);
+  contasRecebidas = aplicarFiltrosContasReceber(contasRecebidas, filtroNormalizado);
+  contasPagas = aplicarFiltrosContasPagar(contasPagas, filtroNormalizado);
+  contasReceberTodas = aplicarFiltrosContasReceber(contasReceberTodas, filtroNormalizado);
+  contasPagarTodas = aplicarFiltrosContasPagar(contasPagarTodas, filtroNormalizado);
 
-  const filtrosAplicados = montarFiltrosAplicados(filtro, fornecedoresMap);
+  const filtrosAplicados = montarFiltrosAplicados(filtroNormalizado, fornecedoresMap);
 
   console.log('📊 Contagens (após filtros):', {
     lancamentos: lancamentos.length,
@@ -977,7 +1105,7 @@ export async function gerarRelatorioCompleto(
   const lucroLiquido = lair - impostoRenda;
 
   const fluxoCaixa = await calcularFluxoCaixa(
-    filtro,
+    filtroNormalizado,
     contasRecebidas,
     contasPagas,
     lancamentos
@@ -992,8 +1120,8 @@ export async function gerarRelatorioCompleto(
     margemBruta > 0 ? despesasFixas / (margemBruta / 100) : 0;
 
   const [prazosMedios, inadimplencia] = await Promise.all([
-    calcularPrazosMedios(filtro),
-    calcularAging(filtro.empresaId),
+    calcularPrazosMedios(filtroNormalizado),
+    calcularAging(filtroNormalizado.empresaId),
   ]);
 
   const lancamentosDetalhe = montarLancamentosDetalhe(
@@ -1062,6 +1190,9 @@ export async function gerarRelatorioCompleto(
       .join('; ');
     notas.push(`Filtros aplicados no demonstrativo — ${partes}.`);
   }
+  if (avisoPeriodo) {
+    notas.push(avisoPeriodo.mensagem);
+  }
 
   return {
     receitaBruta,
@@ -1106,5 +1237,6 @@ export async function gerarRelatorioCompleto(
     orcadoEstimado,
     notas,
     filtrosAplicados,
+    avisoPeriodo,
   };
 }
