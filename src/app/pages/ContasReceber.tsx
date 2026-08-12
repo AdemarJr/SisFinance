@@ -10,9 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { useEmpresa } from '../contexts/EmpresaContext';
 import { useSupabaseRealtimeRefresh } from '../../lib/useSupabaseRealtimeRefresh';
 import { formatarData, hojeLocalYYYYMMDD, toDateInputValue } from '../../lib/formatters';
+import { EmpresaFormSelect } from '../components/EmpresaFormSelect';
+import { defaultEmpresaId, resolveEmpresaIdForSave } from '../../lib/empresa-form';
 
 export function ContasReceber() {
-  const { empresaSelecionada } = useEmpresa();
+  const { empresaSelecionada, empresas } = useEmpresa();
   const [contas, setContas] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,11 +56,6 @@ export function ContasReceber() {
           clientes: c.cliente_id ? { nome: clienteById.get(c.cliente_id)?.nome } : null,
         }))
       );
-      
-      const { data: empresasData } = await db.from('empresas').select('*');
-      if (empresasData && empresasData.length > 0) {
-        setFormData({ ...formData, empresa_id: empresaSelecionada });
-      }
 
       // Atualizar status de contas atrasadas (RPC opcional no Postgres)
       try {
@@ -87,18 +84,22 @@ export function ContasReceber() {
     e.preventDefault();
 
     try {
+      const empresaId = resolveEmpresaIdForSave(
+        formData.empresa_id,
+        empresaSelecionada,
+        empresas
+      );
+      if (!empresaId) {
+        toast.error('Selecione a empresa no formulário');
+        return;
+      }
+
       const conta = {
         ...formData,
-        empresa_id: formData.empresa_id || empresaSelecionada || null,
+        empresa_id: empresaId,
         valor_total: parseFloat(formData.valor_total),
         valor_recebido: 0,
       };
-
-      // Validar empresa_id
-      if (!conta.empresa_id) {
-        toast.error('Por favor, selecione uma empresa');
-        return;
-      }
 
       if (editingId) {
         const { error } = await db
@@ -149,7 +150,7 @@ export function ContasReceber() {
   const handleEdit = (conta: any) => {
     setEditingId(conta.id);
     setFormData({
-      empresa_id: conta.empresa_id,
+      empresa_id: conta.empresa_id ? String(conta.empresa_id) : '',
       descricao: conta.descricao,
       valor_total: conta.valor_total.toString(),
       data_emissao: toDateInputValue(conta.data_emissao),
@@ -178,7 +179,7 @@ export function ContasReceber() {
   const resetForm = () => {
     setEditingId(null);
     setFormData({
-      empresa_id: empresaSelecionada,
+      empresa_id: defaultEmpresaId(empresaSelecionada, empresas),
       descricao: '',
       valor_total: '',
       data_emissao: hojeLocalYYYYMMDD(),
@@ -361,6 +362,12 @@ export function ContasReceber() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <EmpresaFormSelect
+              value={formData.empresa_id}
+              onChange={(id) => setFormData({ ...formData, empresa_id: id })}
+              empresas={empresas}
+            />
+
             <div className="space-y-2">
               <Label htmlFor="descricao">Descrição *</Label>
               <Input

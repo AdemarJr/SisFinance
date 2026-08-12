@@ -4,10 +4,12 @@ import { Plus, Edit, Trash2, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
+import { EmpresaFormSelect } from '../components/EmpresaFormSelect';
 import { useEmpresa } from '../contexts/EmpresaContext';
+import { defaultEmpresaId, resolveEmpresaIdForSave } from '../../lib/empresa-form';
 
 export function Fornecedores() {
-  const { empresaSelecionada } = useEmpresa();
+  const { empresaSelecionada, empresas } = useEmpresa();
   const [fornecedores, setFornecedores] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -46,16 +48,17 @@ export function Fornecedores() {
     e.preventDefault();
 
     try {
-      const dataToSave = {
-        ...formData,
-        empresa_id: formData.empresa_id || empresaSelecionada || null,
-      };
-
-      // Validar empresa_id
-      if (!dataToSave.empresa_id) {
-        toast.error('Por favor, selecione uma empresa');
+      const empresaId = resolveEmpresaIdForSave(
+        formData.empresa_id,
+        empresaSelecionada,
+        empresas
+      );
+      if (!empresaId) {
+        toast.error('Selecione a empresa no formulário');
         return;
       }
+
+      const dataToSave = { ...formData, empresa_id: empresaId };
 
       if (editingId) {
         const { error } = await db
@@ -84,7 +87,7 @@ export function Fornecedores() {
   const handleEdit = (fornecedor: any) => {
     setEditingId(fornecedor.id);
     setFormData({
-      empresa_id: fornecedor.empresa_id,
+      empresa_id: fornecedor.empresa_id ? String(fornecedor.empresa_id) : '',
       nome: fornecedor.nome,
       categoria: fornecedor.categoria || '',
       contato: fornecedor.contato || '',
@@ -112,7 +115,7 @@ export function Fornecedores() {
   const resetForm = () => {
     setEditingId(null);
     setFormData({
-      empresa_id: empresaSelecionada,
+      empresa_id: defaultEmpresaId(empresaSelecionada, empresas),
       nome: '',
       categoria: '',
       contato: '',
@@ -237,6 +240,12 @@ export function Fornecedores() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <EmpresaFormSelect
+              value={formData.empresa_id}
+              onChange={(id) => setFormData({ ...formData, empresa_id: id })}
+              empresas={empresas}
+            />
+
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Nome</label>
               <input

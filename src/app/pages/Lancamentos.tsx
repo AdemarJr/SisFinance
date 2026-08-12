@@ -10,9 +10,11 @@ import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useEmpresa } from '../contexts/EmpresaContext';
 import { formatarData, toDateInputValue, hojeLocalYYYYMMDD } from '../../lib/formatters';
+import { EmpresaFormSelect } from '../components/EmpresaFormSelect';
+import { defaultEmpresaId, resolveEmpresaIdForSave } from '../../lib/empresa-form';
 
 export function Lancamentos() {
-  const { empresaSelecionada } = useEmpresa();
+  const { empresaSelecionada, empresas: empresasContext } = useEmpresa();
   const [lancamentos, setLancamentos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -114,17 +116,21 @@ export function Lancamentos() {
     e.preventDefault();
 
     try {
-      const lancamento = {
-        ...formData,
-        empresa_id: formData.empresa_id || empresaSelecionada || null,
-        valor: parseFloat(formData.valor),
-      };
-
-      // Validar empresa_id
-      if (!lancamento.empresa_id) {
-        toast.error('Por favor, selecione uma empresa');
+      const empresaId = resolveEmpresaIdForSave(
+        formData.empresa_id,
+        empresaSelecionada,
+        empresas.length ? empresas : empresasContext
+      );
+      if (!empresaId) {
+        toast.error('Selecione a empresa no formulário');
         return;
       }
+
+      const lancamento = {
+        ...formData,
+        empresa_id: empresaId,
+        valor: parseFloat(formData.valor),
+      };
 
       if (editingId) {
         const { error } = await db
@@ -184,7 +190,7 @@ export function Lancamentos() {
   const resetForm = () => {
     setEditingId(null);
     setFormData({
-      empresa_id: empresaSelecionada,
+      empresa_id: defaultEmpresaId(empresaSelecionada, empresas.length ? empresas : empresasContext),
       data: hojeLocalYYYYMMDD(),
       tipo: 'Receita',
       valor: '',
@@ -394,26 +400,11 @@ export function Lancamentos() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {empresas.length > 1 && !editingId && (
-              <div className="space-y-2">
-                <Label htmlFor="empresa">Empresa *</Label>
-                <Select 
-                  value={formData.empresa_id} 
-                  onValueChange={(value) => setFormData({ ...formData, empresa_id: value })}
-                >
-                  <SelectTrigger id="empresa">
-                    <SelectValue placeholder="Selecione uma empresa" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {empresas.map((emp) => (
-                      <SelectItem key={emp.id} value={String(emp.id)}>
-                        {emp.nome}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <EmpresaFormSelect
+              value={formData.empresa_id}
+              onChange={(value) => setFormData({ ...formData, empresa_id: value })}
+              empresas={empresas.length ? empresas : empresasContext}
+            />
 
             <div className="space-y-2">
               <Label htmlFor="data">Data *</Label>

@@ -10,9 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { useEmpresa } from '../contexts/EmpresaContext';
 import { useSupabaseRealtimeRefresh } from '../../lib/useSupabaseRealtimeRefresh';
 import { formatarData, hojeLocalYYYYMMDD, toDateInputValue } from '../../lib/formatters';
+import { EmpresaFormSelect } from '../components/EmpresaFormSelect';
+import { defaultEmpresaId, resolveEmpresaIdForSave } from '../../lib/empresa-form';
 
 export function ContasPagar() {
-  const { empresaSelecionada } = useEmpresa();
+  const { empresaSelecionada, empresas } = useEmpresa();
   const [contas, setContas] = useState<any[]>([]);
   const [fornecedores, setFornecedores] = useState<any[]>([]);
   const [funcionarios, setFuncionarios] = useState<any[]>([]);
@@ -119,19 +121,23 @@ export function ContasPagar() {
         observacoes = `FOLHA DE PAGAMENTO (${formData.tipo_folha.toUpperCase()})\n\n` + detalhes.join('\n');
       }
 
+      const empresaId = resolveEmpresaIdForSave(
+        formData.empresa_id,
+        empresaSelecionada,
+        empresas
+      );
+      if (!empresaId) {
+        toast.error('Selecione a empresa no formulário');
+        return;
+      }
+
       const conta = {
         ...formData,
-        empresa_id: formData.empresa_id || empresaSelecionada || null,
+        empresa_id: empresaId,
         valor_total: parseFloat(formData.valor_total),
         valor_pago: 0,
         observacoes: observacoes || formData.observacoes || null,
       };
-
-      // Validar empresa_id
-      if (!conta.empresa_id) {
-        toast.error('Por favor, selecione uma empresa');
-        return;
-      }
 
       if (editingId) {
         const { error } = await db
@@ -268,7 +274,7 @@ export function ContasPagar() {
     setTipoContaSelecionado('normal');
     setFuncionariosSelecionados([]);
     setFormData({
-      empresa_id: empresaSelecionada,
+      empresa_id: defaultEmpresaId(empresaSelecionada, empresas),
       descricao: '',
       valor_total: '',
       data_emissao: hojeLocalYYYYMMDD(),
@@ -499,6 +505,12 @@ export function ContasPagar() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <EmpresaFormSelect
+              value={formData.empresa_id}
+              onChange={(id) => setFormData({ ...formData, empresa_id: id })}
+              empresas={empresas}
+            />
+
             {/* Tipo de Conta */}
             {!editingId && (
               <div className="space-y-2">

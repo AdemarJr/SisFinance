@@ -4,11 +4,13 @@ import { Plus, Edit, Trash2, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Button } from '../components/ui/button';
+import { EmpresaFormSelect } from '../components/EmpresaFormSelect';
 import { useEmpresa } from '../contexts/EmpresaContext';
 import { formatarData, hojeLocalYYYYMMDD, toDateInputValue } from '../../lib/formatters';
+import { defaultEmpresaId, resolveEmpresaIdForSave } from '../../lib/empresa-form';
 
 export function Contas() {
-  const { empresaSelecionada } = useEmpresa();
+  const { empresaSelecionada, empresas } = useEmpresa();
   const [contas, setContas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -47,18 +49,22 @@ export function Contas() {
     e.preventDefault();
 
     try {
+      const empresaId = resolveEmpresaIdForSave(
+        formData.empresa_id,
+        empresaSelecionada,
+        empresas
+      );
+      if (!empresaId) {
+        toast.error('Selecione a empresa no formulário');
+        return;
+      }
+
       const conta = {
         ...formData,
-        empresa_id: formData.empresa_id || empresaSelecionada || null,
+        empresa_id: empresaId,
         saldo_inicial: parseFloat(formData.saldo_inicial),
         saldo_atual: parseFloat(formData.saldo_inicial),
       };
-
-      // Validar empresa_id
-      if (!conta.empresa_id) {
-        toast.error('Por favor, selecione uma empresa');
-        return;
-      }
 
       if (editingId) {
         const { error } = await db
@@ -91,7 +97,7 @@ export function Contas() {
   const handleEdit = (conta: any) => {
     setEditingId(conta.id);
     setFormData({
-      empresa_id: conta.empresa_id,
+      empresa_id: conta.empresa_id ? String(conta.empresa_id) : '',
       nome: conta.nome,
       tipo: conta.tipo,
       saldo_inicial: conta.saldo_inicial.toString(),
@@ -119,7 +125,7 @@ export function Contas() {
   const resetForm = () => {
     setEditingId(null);
     setFormData({
-      empresa_id: empresaSelecionada,
+      empresa_id: defaultEmpresaId(empresaSelecionada, empresas),
       nome: '',
       tipo: 'Banco',
       saldo_inicial: '',
@@ -293,6 +299,12 @@ export function Contas() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <EmpresaFormSelect
+              value={formData.empresa_id}
+              onChange={(id) => setFormData({ ...formData, empresa_id: id })}
+              empresas={empresas}
+            />
+
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Nome</label>
               <input
