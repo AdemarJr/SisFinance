@@ -160,10 +160,10 @@ export function Login() {
                   onClick={fillAdminCredentials}
                   disabled={loading}
                 >
-                  Preencher credenciais de Admin
+                  Login com Admin
                 </Button>
                 <p className="text-xs text-muted-foreground text-center mt-2">
-                  Email: admin@sisfinance.com | Senha: Admin@123456
+                  
                 </p>
               </div>
             </form>
