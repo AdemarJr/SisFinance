@@ -917,6 +917,42 @@ export function calcularIntervaloPeriodo(
   };
 }
 
+/** Intervalo de um mês civil específico (mes = 1–12). Se for o mês corrente, limita até hoje. */
+export function calcularIntervaloMesAno(
+  ano: number,
+  mes: number,
+  referencia: Date = new Date()
+): { dataInicio: string; dataFim: string } {
+  const mes0 = mes - 1;
+  const hoje = new Date(referencia);
+  hoje.setHours(12, 0, 0, 0);
+  const dataInicio = new Date(ano, mes0, 1, 12, 0, 0, 0);
+  let dataFim = fimDoMes(ano, mes0);
+  if (ano === hoje.getFullYear() && mes0 === hoje.getMonth()) {
+    dataFim = hoje;
+  }
+  return {
+    dataInicio: toLocalDateString(dataInicio),
+    dataFim: toLocalDateString(dataFim),
+  };
+}
+
+/** Intervalo de um ano civil. Se for o ano corrente, limita até hoje. */
+export function calcularIntervaloAno(
+  ano: number,
+  referencia: Date = new Date()
+): { dataInicio: string; dataFim: string } {
+  const hoje = new Date(referencia);
+  hoje.setHours(12, 0, 0, 0);
+  const dataInicio = new Date(ano, 0, 1, 12, 0, 0, 0);
+  const dataFim =
+    ano === hoje.getFullYear() ? hoje : new Date(ano, 11, 31, 12, 0, 0, 0);
+  return {
+    dataInicio: toLocalDateString(dataInicio),
+    dataFim: toLocalDateString(dataFim),
+  };
+}
+
 /** Intervalo real de lançamentos no banco (para atalhos e período padrão). */
 export async function buscarIntervaloDadosDisponiveis(empresaId?: string): Promise<{
   dataInicio: string;
