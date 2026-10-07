@@ -1,5 +1,3 @@
-const PRODUCTION_API_URL = 'https://sisfinance-api.up.railway.app/api';
-
 /** Limpa VITE_API_URL (espaços, emojis, texto extra colado do README). */
 function sanitizeApiBase(raw: string): string {
   const match = raw.trim().match(/https?:\/\/[^\s\u{1F300}-\u{1FAFF}\u2600-\u27BF]+/iu);
@@ -14,9 +12,14 @@ function resolveApiBase(): string {
   const envUrl = import.meta.env.VITE_API_URL?.trim();
   if (envUrl) {
     const sanitized = sanitizeApiBase(envUrl);
-    if (sanitized.startsWith('http')) return sanitized;
+    if (sanitized.startsWith('http') || sanitized.startsWith('/')) return sanitized;
   }
-  return import.meta.env.PROD ? PRODUCTION_API_URL : '/api';
+  // Dev: proxy Vite → localhost:3001. Prod: obrigatório VITE_API_URL no build (EasyPanel/Hostinger).
+  if (!import.meta.env.PROD) return '/api';
+  console.error(
+    '[SisFinance] VITE_API_URL ausente no build. Defina no EasyPanel (easypanel.env.example) e faça rebuild.'
+  );
+  return '/api';
 }
 
 export const API_BASE = resolveApiBase();

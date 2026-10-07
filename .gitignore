@@ -12,6 +12,7 @@ build/
 !.env.example
 !**/.env.example
 !hostinger.env.example
+!easypanel.env.example
 
 # Logs
 logs/

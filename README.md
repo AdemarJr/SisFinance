@@ -5,9 +5,11 @@ Interface React do SisFinance. **Não acessa o banco diretamente** — toda comu
 ## Arquitetura
 
 ```text
-Este app (Vite/React)  →  SisFinance-API  →  Postgres (Supabase)
-     Hostinger              Railway
+Este app (Vite/React)  →  SisFinance-API  →  Postgres (EasyPanel)
+     EasyPanel              EasyPanel         pyrou-finace
 ```
+
+Guia completo: [`EASYPANEL.md`](./EASYPANEL.md).
 
 ## Desenvolvimento local
 
@@ -27,7 +29,23 @@ npm run dev
 
 O Vite faz proxy de `/api` → `http://localhost:3001`.
 
-## Deploy Hostinger
+## Deploy EasyPanel
+
+| Campo | Valor |
+|-------|--------|
+| Build | `Dockerfile` |
+| Porta | `80` |
+| Health | `/healthz` |
+
+**Variável de ambiente (build):**
+
+```env
+VITE_API_URL=https://SEU-DOMINIO-API/api
+```
+
+Ver `easypanel.env.example` e `EASYPANEL.md`.
+
+## Deploy Hostinger (legado)
 
 | Campo | Valor |
 |-------|--------|
@@ -36,17 +54,12 @@ O Vite faz proxy de `/api` → `http://localhost:3001`.
 | Output | `dist` |
 | Start | *(vazio)* |
 
-**Variável de ambiente (build):**
-
-```env
-VITE_API_URL=https://SEU-APP.up.railway.app/api
-```
-
-Ver também `hostinger.env.example`.
+Ver `hostinger.env.example`.
 
 ## Banco de dados / SQL
 
-Os scripts SQL ficam no repositório **SisFinance-API** em `database/`.
+Dump e import EasyPanel: `sisfinance-db/` (ver `IMPORT-EASYPANEL.md`).  
+Scripts extras da API: `SisFinance-API/database/`.
 
 ## Modo mock (sem API)
 

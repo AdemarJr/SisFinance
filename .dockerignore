@@ -1,0 +1,14 @@
+node_modules
+dist
+build
+.git
+.cursor
+.env
+.env.*
+!.env.example
+*.md
+.DS_Store
+SisFinance-API
+sisfinance-api
+sisfinance-db
+hostinger.env.example

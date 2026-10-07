@@ -53,17 +53,36 @@ Se atualizar os arquivos `*_rows.sql`:
 
 ## Após o import
 
+### 1. Coluna de senha (obrigatório para login via API)
+
+```bash
+psql -v ON_ERROR_STOP=1 -f post-import-easypanel.sql
+```
+
+Ou no console SQL do EasyPanel, execute `post-import-easypanel.sql`.
+
+### 2. Senha do admin
+
 O admin já vem nos dados:
 
 - Email: `admin@sisfinance.com`
 - Perfil: Super Admin (Enterprise)
 
-A senha de login depende da API/auth configurada no backend — não está no dump SQL.
+A senha **não** está no dump. Com a API no ar:
 
-Verifique com:
+```bash
+# No serviço sisfinance-api (env ADMIN_EMAIL / ADMIN_PASSWORD)
+npm run set-admin-password
+```
+
+### 3. Conferência
 
 ```sql
 SELECT count(*) FROM empresas;
 SELECT count(*) FROM lancamentos;
 SELECT * FROM vw_clientes_resumo;
+SELECT column_name FROM information_schema.columns
+  WHERE table_name = 'clientes_sistema' AND column_name = 'senha_hash';
 ```
+
+Deploy dos apps: ver [`../EASYPANEL.md`](../EASYPANEL.md).
